@@ -17,7 +17,7 @@
 #include "game/GameModel.h"
 
 ColourPickerActivity::ColourPickerActivity(ui::Colour initialColour, ColourPickedCallback * callback) :
-	WindowActivity(ui::Point(-1, -1), ui::Point(266, 302)),
+	WindowActivity(ui::Point(-1, -1), ui::Point(266, 175)),
 	currentHue(0),
 	currentSaturation(0),
 	currentValue(0),
@@ -132,7 +132,7 @@ void ColourPickerActivity::OnMouseMove(int x, int y, int dx, int dy)
 		y -= Position.Y+5;
 
 		currentHue = (float(x)/float(255))*359.0f;
-		currentSaturation = 255-y;
+		currentSaturation = 255-(y*2);
 	
 		if(currentSaturation > 255)
 			currentSaturation = 255;
@@ -169,11 +169,11 @@ void ColourPickerActivity::OnMouseDown(int x, int y, unsigned button)
 {
 	x -= Position.X+5;
 	y -= Position.Y+5;
-	if(x > 0 && x < 256 && y >= 0 && y < 256)
+	if(x >= 0 && x < 256 && y >= 0 && y <= 128)
 	{
 		mouseDown = true;
 		currentHue = (float(x)/float(255))*359.0f;
-		currentSaturation = 255-y;
+		currentSaturation = 255-(y*2);
 
 		if(currentSaturation > 255)
 			currentSaturation = 255;
@@ -185,7 +185,7 @@ void ColourPickerActivity::OnMouseDown(int x, int y, unsigned button)
 			currentHue = 0;
 	}
 
-	if(x > 0 && x < 256 && y > 259 && y < 272)
+	if(x >= 0 && x < 256 && y >= 132 && y <= 142)
 	{
 		valueMouseDown = true;
 		currentValue = x;
@@ -220,7 +220,7 @@ void ColourPickerActivity::OnMouseUp(int x, int y, unsigned button)
 		y -= Position.Y+5;
 
 		currentHue = (float(x)/float(255))*359.0f;
-		currentSaturation = 255-y;
+		currentSaturation = 255-(y*2);
 
 		if(currentSaturation > 255)
 			currentSaturation = 255;
@@ -256,17 +256,18 @@ void ColourPickerActivity::OnDraw()
 	g->fillrect(Position.X-2, Position.Y-2, Size.X+3, Size.Y+3, 0, 0, 0, currentAlpha);
 	g->drawrect(Position.X, Position.Y, Size.X, Size.Y, 255, 255, 255, 255);
 
-	g->drawrect(Position.X+4, Position.Y+4, 258, 258, 180, 180, 180, 255);
+	g->drawrect(Position.X+4, Position.Y+4, 258, 130, 180, 180, 180, 255);
 
-	g->drawrect(Position.X+4, Position.Y+4+5+255, 258, 12, 180, 180, 180, 255);
+	g->drawrect(Position.X+4, Position.Y+4+4+128, 258, 12, 180, 180, 180, 255);
 
 
 	int offsetX = Position.X+5;
 	int offsetY = Position.Y+5;
 
+
 	//draw color square
 	int lastx = -1, currx = 0;
-	for(int saturation = 0; saturation <= 255; saturation++)
+	for(int saturation = 0; saturation <= 255; saturation+=2)
 	{
 		for(int hue = 0; hue <= 359; hue++)
 		{
@@ -278,7 +279,7 @@ void ColourPickerActivity::OnDraw()
 			int cg = 0;
 			int cb = 0;
 			HSV_to_RGB(hue, 255-saturation, currentValue, &cr, &cg, &cb);
-			g->blendpixel(currx, saturation+offsetY, cr, cg, cb, currentAlpha);
+			g->blendpixel(currx, (saturation/2)+offsetY, cr, cg, cb, currentAlpha);
 		}
 	}
 
@@ -291,12 +292,12 @@ void ColourPickerActivity::OnDraw()
 			int cb = 0;
 			HSV_to_RGB(currentHue, currentSaturation, value, &cr, &cg, &cb);
 
-			g->blendpixel(value+offsetX, i+offsetY+254+6, cr, cg, cb, currentAlpha);
+			g->blendpixel(value+offsetX, i+offsetY+127+5, cr, cg, cb, currentAlpha);
 		}
 
 	//draw color square pointer
 	int currentHueX = clamp_flt(currentHue, 0, 359);
-	int currentSaturationY = (255-currentSaturation);
+	int currentSaturationY = ((255-currentSaturation)/2);
 	g->xor_line(offsetX+currentHueX, offsetY+currentSaturationY-5, offsetX+currentHueX, offsetY+currentSaturationY-1);
 	g->xor_line(offsetX+currentHueX, offsetY+currentSaturationY+1, offsetX+currentHueX, offsetY+currentSaturationY+5);
 	g->xor_line(offsetX+currentHueX-5, offsetY+currentSaturationY, offsetX+currentHueX-1, offsetY+currentSaturationY);
@@ -304,8 +305,8 @@ void ColourPickerActivity::OnDraw()
 
 	//draw brightness bar pointer
 	int currentValueX = restrict_flt(currentValue, 0, 254);
-	g->xor_line(offsetX+currentValueX, offsetY+5+255, offsetX+currentValueX, offsetY+14+255);
-	g->xor_line(offsetX+currentValueX+1, offsetY+5+255, offsetX+currentValueX+1, offsetY+14+255);
+	g->xor_line(offsetX+currentValueX, offsetY+4+128, offsetX+currentValueX, offsetY+13+128);
+	g->xor_line(offsetX+currentValueX+1, offsetY+4+128, offsetX+currentValueX+1, offsetY+13+128);
 }
 
 ColourPickerActivity::~ColourPickerActivity() {

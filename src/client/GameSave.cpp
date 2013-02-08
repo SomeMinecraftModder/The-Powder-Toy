@@ -21,7 +21,6 @@ gravityEnable(save.gravityEnable),
 paused(save.paused),
 gravityMode(save.gravityMode),
 airMode(save.airMode),
-edgeMode(save.edgeMode),
 signs(save.signs),
 expanded(save.expanded),
 hasOriginalData(save.hasOriginalData),
@@ -657,17 +656,6 @@ void GameSave::readOPS(char * data, int dataLength)
 			if(bson_iterator_type(&iter)==BSON_INT)
 			{
 				airMode = bson_iterator_int(&iter);
-			}
-			else
-			{
-				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
-			}
-		}
-		else if(strcmp(bson_iterator_key(&iter), "edgeMode")==0)
-		{
-			if(bson_iterator_type(&iter)==BSON_INT)
-			{
-				edgeMode = bson_iterator_int(&iter);
 			}
 			else
 			{

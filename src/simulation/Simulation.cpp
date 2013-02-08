@@ -269,14 +269,6 @@ GameSave * Simulation::Save(int fullX, int fullY, int fullX2, int fullY2)
 		}
 	}
 
-	newSave->paused = sys_pause;
-	newSave->gravityMode = gravityMode;
-	newSave->airMode = air->airMode;
-	newSave->legacyEnable = legacy_enable;
-	newSave->waterEEnabled = water_equal_test;
-	newSave->gravityEnable = grav->ngrav_enable;
-	newSave->edgeMode = edgeMode;
-
 	return newSave;
 }
 
@@ -288,8 +280,8 @@ Snapshot * Simulation::CreateSnapshot()
 	snap->AirVelocityY.insert(snap->AirVelocityY.begin(), &vy[0][0], &vy[0][0]+((XRES/CELL)*(YRES/CELL)));
 	snap->AmbientHeat.insert(snap->AmbientHeat.begin(), &hv[0][0], &hv[0][0]+((XRES/CELL)*(YRES/CELL)));
 	snap->Particles.insert(snap->Particles.begin(), parts, parts+NPART);
-	snap->PortalParticles.insert(snap->PortalParticles.begin(), &portalp[0][0][0], &portalp[0][0][0]+(CHANNELS*8*80));//&portalp[CHANNELS-1][8-1][80-1]);
-	snap->WirelessData.insert(snap->WirelessData.begin(), &wireless[0][0], &wireless[0][0]+(CHANNELS*2));//&wireless[CHANNELS-1][2-1]);
+	snap->PortalParticles.insert(snap->PortalParticles.begin(), &portalp[0][0][0], &portalp[CHANNELS-1][8-1][80-1]);
+	snap->WirelessData.insert(snap->WirelessData.begin(), &wireless[0][0], &wireless[CHANNELS-1][2-1]);
 	snap->GravVelocityX.insert(snap->GravVelocityX.begin(), gravx, gravx+((XRES/CELL)*(YRES/CELL)));
 	snap->GravVelocityY.insert(snap->GravVelocityY.begin(), gravy, gravy+((XRES/CELL)*(YRES/CELL)));
 	snap->GravValue.insert(snap->GravValue.begin(), gravp, gravp+((XRES/CELL)*(YRES/CELL)));
@@ -668,33 +660,35 @@ int Simulation::FloodINST(int x, int y, int fullc, int cm)
 }
 
 
-int Simulation::FloodParts(int x, int y, int fullc, int cm, int flags)
+int Simulation::FloodParts(int x, int y, int fullc, int cm, int bm, int flags)
 {
 	int c = fullc&0xFF;
-	int x1, x2;
+	int x1, x2, dy = (c<PT_NUM)?1:CELL;
+	int co = c;
 	int coord_stack_limit = XRES*YRES;
 	unsigned short (*coord_stack)[2];
 	int coord_stack_size = 0;
-	int parts_created = 0;
-	bool use_photons = false;
+	int created_something = 0;
 
+	if (c==SPC_PROP)
+		return 0;
 	if (cm==-1)
 	{
 		if (c==0)
 		{
 			cm = pmap[y][x]&0xFF;
 			if (!cm)
-				cm = photons[y][x]&0xFF;
-			if (!cm)
 				return 0;
 		}
 		else
 			cm = 0;
 	}
-	if ((elements[c].Properties & TYPE_ENERGY) || (photons[y][x]&0xFF))
-		use_photons = true;
+	if (bm==-1)
+	{
+		bm = bmap[y/CELL][x/CELL];
+	}
 
-	if ((!use_photons && (pmap[y][x]&0xFF) != cm) || (use_photons && (photons[y][x]&0xFF) != cm))
+	if (((pmap[y][x]&0xFF)!=cm || bmap[y/CELL][x/CELL]!=bm ))
 		return 1;
 
 	coord_stack = (short unsigned int (*)[2])malloc(sizeof(unsigned short)*2*coord_stack_limit);
@@ -709,18 +703,18 @@ int Simulation::FloodParts(int x, int y, int fullc, int cm, int flags)
 		y = coord_stack[coord_stack_size][1];
 		x1 = x2 = x;
 		// go left as far as possible
-		while (x1>=CELL || ((c == 0 || !OutOfBounds(x1-1, y)) && x1 > 0))
+		while (x1>=CELL)
 		{
-			if ((!use_photons && (pmap[y][x1-1]&0xFF) != cm) || (use_photons && (photons[y][x1-1]&0xFF) != cm))
+			if ((pmap[y][x1-1]&0xFF)!=cm || bmap[y/CELL][(x1-1)/CELL]!=bm)
 			{
 				break;
 			}
 			x1--;
 		}
 		// go right as far as possible
-		while (x2<XRES-CELL || ((c == 0 || !OutOfBounds(x2+1, y)) && x2 < XRES-1))
+		while (x2<XRES-CELL)
 		{
-			if ((!use_photons && (pmap[y][x2+1]&0xFF) != cm) || (use_photons && (photons[y][x2+1]&0xFF) != cm))
+			if ((pmap[y][x2+1]&0xFF)!=cm || bmap[y/CELL][(x2+1)/CELL]!=bm)
 			{
 				break;
 			}
@@ -729,17 +723,16 @@ int Simulation::FloodParts(int x, int y, int fullc, int cm, int flags)
 		// fill span
 		for (x=x1; x<=x2; x++)
 		{
-			if (CreateParts(x, y, 0, 0, fullc, flags) != -1)
-				parts_created++;
+			if (CreateParts(x, y, 0, 0, fullc, flags))
+				created_something = 1;
 		}
 
-		// fill children
-		if (y>=CELL || ((c == 0 || !OutOfBounds(x, y-1) && y > 0)))
+		if (y>=CELL+dy)
 			for (x=x1; x<=x2; x++)
-				if ((!use_photons && (pmap[y-1][x]&0xFF) == cm) || (use_photons && (photons[y-1][x]&0xFF) == cm))
+				if ((pmap[y-dy][x]&0xFF)==cm && bmap[(y-dy)/CELL][x/CELL]==bm)
 				{
 					coord_stack[coord_stack_size][0] = x;
-					coord_stack[coord_stack_size][1] = y-1;
+					coord_stack[coord_stack_size][1] = y-dy;
 					coord_stack_size++;
 					if (coord_stack_size>=coord_stack_limit)
 					{
@@ -748,12 +741,12 @@ int Simulation::FloodParts(int x, int y, int fullc, int cm, int flags)
 					}
 				}
 
-		if (y<YRES-CELL-1 || ((c == 0 || !OutOfBounds(x, y+1) && y < YRES-1)))
+		if (y<YRES-CELL-dy)
 			for (x=x1; x<=x2; x++)
-				if ((!use_photons && (pmap[y+1][x]&0xFF) == cm) || (use_photons && (photons[y+1][x]&0xFF) == cm))
+				if ((pmap[y+dy][x]&0xFF)==cm && bmap[(y+dy)/CELL][x/CELL]==bm)
 				{
 					coord_stack[coord_stack_size][0] = x;
-					coord_stack[coord_stack_size][1] = y+1;
+					coord_stack[coord_stack_size][1] = y+dy;
 					coord_stack_size++;
 					if (coord_stack_size>=coord_stack_limit)
 					{
@@ -763,12 +756,17 @@ int Simulation::FloodParts(int x, int y, int fullc, int cm, int flags)
 				}
 	} while (coord_stack_size>0);
 	free(coord_stack);
-	return parts_created;
+	return created_something;
 }
 
-int Simulation::FloodWalls(int x, int y, int c, int bm, int flags)
+int Simulation::FloodWalls(int x, int y, int c, int cm, int bm, int flags)
 {
 	int x1, x2, dy = CELL;
+	int co = c;
+	if (cm==-1)
+	{
+		cm = pmap[y][x]&0xFF;
+	}
 	if (bm==-1)
 	{
 		if (c==WL_ERASE)
@@ -781,14 +779,14 @@ int Simulation::FloodWalls(int x, int y, int c, int bm, int flags)
 			bm = 0;
 	}
 	
-	if ((bmap[y/CELL][x/CELL]!=bm )/*||( (flags&BRUSH_SPECIFIC_DELETE) && cm!=SLALT)*/)
+	if (((pmap[y][x]&0xFF)!=cm || bmap[y/CELL][x/CELL]!=bm )/*||( (flags&BRUSH_SPECIFIC_DELETE) && cm!=SLALT)*/)
 		return 1;
 	
 	// go left as far as possible
 	x1 = x2 = x;
 	while (x1>=CELL)
 	{
-		if (bmap[y/CELL][(x1-1)/CELL]!=bm)
+		if ((pmap[y][x1-1]&0xFF)!=cm || bmap[y/CELL][(x1-1)/CELL]!=bm)
 		{
 			break;
 		}
@@ -796,7 +794,7 @@ int Simulation::FloodWalls(int x, int y, int c, int bm, int flags)
 	}
 	while (x2<XRES-CELL)
 	{
-		if (bmap[y/CELL][(x2+1)/CELL]!=bm)
+		if ((pmap[y][x2+1]&0xFF)!=cm || bmap[y/CELL][(x2+1)/CELL]!=bm)
 		{
 			break;
 		}
@@ -812,13 +810,13 @@ int Simulation::FloodWalls(int x, int y, int c, int bm, int flags)
 	// fill children
 	if (y>=CELL+dy)
 		for (x=x1; x<=x2; x++)
-			if (bmap[(y-dy)/CELL][x/CELL]==bm)
-				if (!FloodWalls(x, y-dy, c, bm, flags))
+			if ((pmap[y-dy][x]&0xFF)==cm && bmap[(y-dy)/CELL][x/CELL]==bm)
+				if (!FloodWalls(x, y-dy, c, cm, bm, flags))
 					return 0;
 	if (y<YRES-CELL-dy)
 		for (x=x1; x<=x2; x++)
-			if (bmap[(y+dy)/CELL][x/CELL]==bm)
-				if (!FloodWalls(x, y+dy, c, bm, flags))
+			if ((pmap[y+dy][x]&0xFF)==cm && bmap[(y+dy)/CELL][x/CELL]==bm)
+				if (!FloodWalls(x, y+dy, c, cm, bm, flags))
 					return 0;
 	return 1;
 }
@@ -900,8 +898,6 @@ void Simulation::SetEdgeMode(int newEdgeMode)
 	switch(edgeMode)
 	{
 	case 0:
-	case 2:
-	case 3:
 		for(int i = 0; i<(XRES/CELL); i++)
 		{
 			bmap[0][i] = 0;
@@ -1997,7 +1993,6 @@ void Simulation::clear_sim(void)
 	}
 	SetEdgeMode(edgeMode);
 }
-
 void Simulation::init_can_move()
 {
 	// can_move[moving type][type at destination]
@@ -2369,31 +2364,10 @@ int Simulation::try_move(int i, int x, int y, int nx, int ny)
 	return 1;
 }
 
-bool Simulation::OutOfBounds(int x, int y)
-{
-	if (edgeMode != 3)
-		return (x < CELL || x > XRES-CELL || y < CELL || y > YRES-CELL);
-	else
-		return (x < 0 || x > XRES || y < 0 || y > YRES);
-}
-
 // try to move particle, and if successful update pmap and parts[i].x,y
 int Simulation::do_move(int i, int x, int y, float nxf, float nyf)
 {
 	int nx = (int)(nxf+0.5f), ny = (int)(nyf+0.5f), result;
-	if (edgeMode == 2)
-	{
-		if (nx < CELL)
-			nxf += XRES-CELL*2;
-		if (nx >= XRES-CELL)
-			nxf -= XRES-CELL*2;
-		if (ny < CELL)
-			nyf += YRES-CELL*2;
-		if (ny >= YRES-CELL)
-			nyf -= YRES-CELL*2;
-		nx = (int)(nxf+0.5f);
-		ny = (int)(nyf+0.5f);
-	}
 	if (parts[i].type == PT_NONE)
 		return 0;
 	result = try_move(i, x, y, nx, ny);
@@ -2406,7 +2380,7 @@ int Simulation::do_move(int i, int x, int y, float nxf, float nyf)
 		{
 			if ((pmap[y][x]>>8)==i) pmap[y][x] = 0;
 			else if ((photons[y][x]>>8)==i) photons[y][x] = 0;
-			if (OutOfBounds(nx, ny))//kill_part if particle is out of bounds
+			if (nx<CELL || nx>=XRES-CELL || ny<CELL || ny>=YRES-CELL)//kill_part if particle is out of bounds
 			{
 				kill_part(i);
 				return -1;
@@ -3666,18 +3640,18 @@ void Simulation::update_particles_i(int start, int inc)
 			y = (int)(parts[i].y+0.5f);
 
 			//this kills any particle out of the screen, or in a wall where it isn't supposed to go
-			if (OutOfBounds(x, y) ||
-					(bmap[y/CELL][x/CELL] &&
-					(bmap[y/CELL][x/CELL]==WL_WALL ||
-					(bmap[y/CELL][x/CELL]==WL_WALLELEC) ||
-					(bmap[y/CELL][x/CELL]==WL_ALLOWAIR) ||
-					(bmap[y/CELL][x/CELL]==WL_DESTROYALL) ||
-					(bmap[y/CELL][x/CELL]==WL_ALLOWLIQUID && elements[t].Falldown!=2) ||
-					(bmap[y/CELL][x/CELL]==WL_ALLOWSOLID && elements[t].Falldown!=1) ||
-					(bmap[y/CELL][x/CELL]==WL_ALLOWGAS && !(elements[t].Properties&TYPE_GAS)) || //&& elements[t].Falldown!=0 && parts[i].type!=PT_FIRE && parts[i].type!=PT_SMKE && parts[i].type!=PT_HFLM) ||
-					(bmap[y/CELL][x/CELL]==WL_ALLOWENERGY && !(elements[t].Properties&TYPE_ENERGY)) ||
-					(bmap[y/CELL][x/CELL]==WL_DETECT && (t==PT_METL || t==PT_SPRK)) ||
-					(bmap[y/CELL][x/CELL]==WL_EWALL && !emap[y/CELL][x/CELL])) && (t!=PT_STKM) && (t!=PT_STKM2) && (t!=PT_FIGH)))
+			if (x<CELL || y<CELL || x>=XRES-CELL || y>=YRES-CELL ||
+			        (bmap[y/CELL][x/CELL] &&
+			         (bmap[y/CELL][x/CELL]==WL_WALL ||
+			          bmap[y/CELL][x/CELL]==WL_WALLELEC ||
+			          bmap[y/CELL][x/CELL]==WL_ALLOWAIR ||
+			          (bmap[y/CELL][x/CELL]==WL_DESTROYALL) ||
+			          (bmap[y/CELL][x/CELL]==WL_ALLOWLIQUID && elements[t].Falldown!=2) ||
+			          (bmap[y/CELL][x/CELL]==WL_ALLOWSOLID && elements[t].Falldown!=1) ||
+			          (bmap[y/CELL][x/CELL]==WL_ALLOWGAS && !(elements[t].Properties&TYPE_GAS)) || //&& elements[t].Falldown!=0 && parts[i].type!=PT_FIRE && parts[i].type!=PT_SMKE && parts[i].type!=PT_HFLM) ||
+			          (bmap[y/CELL][x/CELL]==WL_ALLOWENERGY && !(elements[t].Properties&TYPE_ENERGY)) ||
+					  (bmap[y/CELL][x/CELL]==WL_DETECT && (t==PT_METL || t==PT_SPRK)) ||
+			          (bmap[y/CELL][x/CELL]==WL_EWALL && !emap[y/CELL][x/CELL])) && (t!=PT_STKM) && (t!=PT_STKM2) && (t!=PT_FIGH)))
 			{
 				kill_part(i);
 				continue;
@@ -3689,62 +3663,69 @@ void Simulation::update_particles_i(int start, int inc)
 			vx[y/CELL][x/CELL] = vx[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vx;
 			vy[y/CELL][x/CELL] = vy[y/CELL][x/CELL]*elements[t].AirLoss + elements[t].AirDrag*parts[i].vy;
 
-			if (t==PT_GAS||t==PT_NBLE)
+			if (elements[t].HotAir)
 			{
-				if (pv[y/CELL][x/CELL]<3.5f)
-					pv[y/CELL][x/CELL] += elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL]);
-				if (y+CELL<YRES && pv[y/CELL+1][x/CELL]<3.5f)
-					pv[y/CELL+1][x/CELL] += elements[t].HotAir*(3.5f-pv[y/CELL+1][x/CELL]);
-				if (x+CELL<XRES)
+				if (t==PT_GAS||t==PT_NBLE)
 				{
-					if (pv[y/CELL][x/CELL+1]<3.5f)
-						pv[y/CELL][x/CELL+1] += elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL+1]);
-					if (y+CELL<YRES && pv[y/CELL+1][x/CELL+1]<3.5f)
-						pv[y/CELL+1][x/CELL+1] += elements[t].HotAir*(3.5f-pv[y/CELL+1][x/CELL+1]);
+					if (pv[y/CELL][x/CELL]<3.5f)
+						pv[y/CELL][x/CELL] += elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL]);
+					if (y+CELL<YRES && pv[y/CELL+1][x/CELL]<3.5f)
+						pv[y/CELL+1][x/CELL] += elements[t].HotAir*(3.5f-pv[y/CELL+1][x/CELL]);
+					if (x+CELL<XRES)
+					{
+						if (pv[y/CELL][x/CELL+1]<3.5f)
+							pv[y/CELL][x/CELL+1] += elements[t].HotAir*(3.5f-pv[y/CELL][x/CELL+1]);
+						if (y+CELL<YRES && pv[y/CELL+1][x/CELL+1]<3.5f)
+							pv[y/CELL+1][x/CELL+1] += elements[t].HotAir*(3.5f-pv[y/CELL+1][x/CELL+1]);
+					}
 				}
-			}
-			else//add the hotair variable to the pressure map, like black hole, or white hole.
-			{
-				pv[y/CELL][x/CELL] += elements[t].HotAir;
-				if (y+CELL<YRES)
-					pv[y/CELL+1][x/CELL] += elements[t].HotAir;
-				if (x+CELL<XRES)
+				else//add the hotair variable to the pressure map, like black hole, or white hole.
 				{
-					pv[y/CELL][x/CELL+1] += elements[t].HotAir;
+					pv[y/CELL][x/CELL] += elements[t].HotAir;
 					if (y+CELL<YRES)
-						pv[y/CELL+1][x/CELL+1] += elements[t].HotAir;
+						pv[y/CELL+1][x/CELL] += elements[t].HotAir;
+					if (x+CELL<XRES)
+					{
+						pv[y/CELL][x/CELL+1] += elements[t].HotAir;
+						if (y+CELL<YRES)
+							pv[y/CELL+1][x/CELL+1] += elements[t].HotAir;
+					}
 				}
 			}
-
-			//Gravity mode by Moach
-			switch (gravityMode)
+			if (elements[t].Gravity || !(elements[t].Properties & TYPE_SOLID))
 			{
-			default:
-			case 0:
-				pGravX = 0.0f;
-				pGravY = elements[t].Gravity;
-				break;
-			case 1:
-				pGravX = pGravY = 0.0f;
-				break;
-			case 2:
-				pGravD = 0.01f - hypotf((x - XCNTR), (y - YCNTR));
-				pGravX = elements[t].Gravity * ((float)(x - XCNTR) / pGravD);
-				pGravY = elements[t].Gravity * ((float)(y - YCNTR) / pGravD);
-				break;
+				//Gravity mode by Moach
+				switch (gravityMode)
+				{
+				default:
+				case 0:
+					pGravX = 0.0f;
+					pGravY = elements[t].Gravity;
+					break;
+				case 1:
+					pGravX = pGravY = 0.0f;
+					break;
+				case 2:
+					pGravD = 0.01f - hypotf((x - XCNTR), (y - YCNTR));
+					pGravX = elements[t].Gravity * ((float)(x - XCNTR) / pGravD);
+					pGravY = elements[t].Gravity * ((float)(y - YCNTR) / pGravD);
+					break;
+				}
+				//Get some gravity from the gravity map
+				if (t==PT_ANAR)
+				{
+					// perhaps we should have a ptypes variable for this
+					pGravX -= gravx[(y/CELL)*(XRES/CELL)+(x/CELL)];
+					pGravY -= gravy[(y/CELL)*(XRES/CELL)+(x/CELL)];
+				}
+				else if(t!=PT_STKM && t!=PT_STKM2 && t!=PT_FIGH && !(elements[t].Properties & TYPE_SOLID))
+				{
+					pGravX += gravx[(y/CELL)*(XRES/CELL)+(x/CELL)];
+					pGravY += gravy[(y/CELL)*(XRES/CELL)+(x/CELL)];
+				}
 			}
-			//Get some gravity from the gravity map
-			if (t==PT_ANAR)
-			{
-				// perhaps we should have a ptypes variable for this
-				pGravX -= gravx[(y/CELL)*(XRES/CELL)+(x/CELL)];
-				pGravY -= gravy[(y/CELL)*(XRES/CELL)+(x/CELL)];
-			}
-			else if(t!=PT_STKM && t!=PT_STKM2 && t!=PT_FIGH && !(elements[t].Properties & TYPE_SOLID))
-			{
-				pGravX += gravx[(y/CELL)*(XRES/CELL)+(x/CELL)];
-				pGravY += gravy[(y/CELL)*(XRES/CELL)+(x/CELL)];
-			}
+			else
+				pGravX = pGravY = 0;
 			//velocity updates for the particle
 			if (t != PT_SPNG || !(parts[i].flags&FLAG_MOVABLE))
 			{
@@ -3771,24 +3752,13 @@ void Simulation::update_particles_i(int start, int inc)
 			j = surround_space = nt = 0;//if nt is greater than 1 after this, then there is a particle around the current particle, that is NOT the current particle's type, for water movement.
 			for (nx=-1; nx<2; nx++)
 				for (ny=-1; ny<2; ny++) {
-					if (nx||ny)
-					{
-						if (!OutOfBounds(x+nx, y+ny))
-						{
-							surround[j] = r = pmap[y+ny][x+nx];
-							j++;
-							if (!(r&0xFF))
-								surround_space++;//there is empty space
-							if ((r&0xFF)!=t)
-								nt++;//there is nothing or a different particle
-						}
-						else
-						{
-							surround[j] = 0;
-							j++;
-							surround_space++;
-							nt++;
-						}
+					if (nx||ny) {
+						surround[j] = r = pmap[y+ny][x+nx];
+						j++;
+						if (!(r&0xFF))
+							surround_space++;//there is empty space
+						if ((r&0xFF)!=t)
+							nt++;//there is nothing or a different particle
 					}
 				}
 
@@ -4143,7 +4113,7 @@ void Simulation::update_particles_i(int start, int inc)
 					else s = 0;
 				}
 				else s = 0;
-			} else if (pv[y/CELL][x/CELL]<elements[t].LowPressure&&elements[t].LowPressureTransition>-1&&gravtot<=(elements[elements[t].LowPressureTransition].HighPressure/4.0f)) {
+			} else if (pv[y/CELL][x/CELL]<elements[t].LowPressure&&elements[t].LowPressureTransition>-1) {
 				// particle type change due to low pressure
 				if (elements[t].LowPressureTransition!=PT_NUM)
 					t = elements[t].LowPressureTransition;
@@ -4229,19 +4199,6 @@ killed:
 					fin_yf += dy;
 					fin_x = (int)(fin_xf+0.5f);
 					fin_y = (int)(fin_yf+0.5f);
-					if (edgeMode == 2)
-					{
-						if (fin_x < CELL)
-							fin_xf += XRES-CELL*2;
-						if (fin_x >= XRES-CELL)
-							fin_xf -= XRES-CELL*2;
-						if (fin_y < CELL)
-							fin_yf += YRES-CELL*2;
-						if (fin_y >= YRES-CELL)
-							fin_yf -= YRES-CELL*2;
-						fin_x = (int)(fin_xf+0.5f);
-						fin_y = (int)(fin_yf+0.5f);
-					}
 					if (mv <= 0.0f)
 					{
 						// nothing found
@@ -4255,7 +4212,7 @@ killed:
 						clear_y = (int)(clear_yf+0.5f);
 						break;
 					}
-					if (OutOfBounds(fin_x, fin_y) || pmap[fin_y][fin_x] || (bmap[fin_y/CELL][fin_x/CELL] && (bmap[fin_y/CELL][fin_x/CELL]==WL_DESTROYALL || !eval_move(t,fin_x,fin_y,NULL))))
+					if (fin_x<CELL || fin_y<CELL || fin_x>=XRES-CELL || fin_y>=YRES-CELL || pmap[fin_y][fin_x] || (bmap[fin_y/CELL][fin_x/CELL] && (bmap[fin_y/CELL][fin_x/CELL]==WL_DESTROYALL || !eval_move(t,fin_x,fin_y,NULL))))
 					{
 						// found an obstacle
 						clear_xf = fin_xf-dx;
@@ -4284,7 +4241,7 @@ killed:
 				{
 					if ((pmap[y][x]>>8)==i) pmap[y][x] = 0;
 					else if ((photons[y][x]>>8)==i) photons[y][x] = 0;
-					if (OutOfBounds(nx, ny))
+					if (nx<CELL || nx>=XRES-CELL || ny<CELL || ny>=YRES-CELL)
 					{
 						kill_part(i);
 						continue;
@@ -4933,29 +4890,4 @@ Simulation::Simulation():
 	clear_sim();
 
 	grav->gravity_mask();
-
-	int loverule[9][9] =
-	{
-		{0,0,1,1,0,0,0,0,0},
-		{0,1,0,0,1,1,0,0,0},
-		{1,0,0,0,0,0,1,0,0},
-		{1,0,0,0,0,0,0,1,0},
-		{0,1,0,0,0,0,0,0,1},
-		{1,0,0,0,0,0,0,1,0},
-		{1,0,0,0,0,0,1,0,0},
-		{0,1,0,0,1,1,0,0,0},
-		{0,0,1,1,0,0,0,0,0},
-	};
-	int lolzrule[9][9] =
-	{
-		{0,0,0,0,0,0,0,0,0},
-		{1,0,0,0,0,0,1,0,0},
-		{1,0,0,0,0,0,1,0,0},
-		{1,0,0,1,1,0,0,1,0},
-		{1,0,1,0,0,1,0,1,0},
-		{1,0,1,0,0,1,0,1,0},
-		{0,1,0,1,1,0,0,1,0},
-		{0,1,0,0,0,0,0,1,0},
-		{0,1,0,0,0,0,0,1,0},
-	};
 }

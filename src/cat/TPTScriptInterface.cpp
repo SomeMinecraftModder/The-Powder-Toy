@@ -216,24 +216,13 @@ AnyType TPTScriptInterface::tptS_set(std::deque<std::string> * words)
 		newValue = ((NumberType)value).Value();
 	else if(value.GetType() == TypeString)
 	{
-		std::string newString = ((StringType)value).Value();
-		ValueType asdf = testType(newString.substr(0, newString.length()-1));
-		if (newString[newString.length()-1] == 'C' && asdf == TypeNumber)
+		newValue = GetParticleType(((StringType)value).Value());
+		if (newValue < 0 || newValue >= PT_NUM)
 		{
-			newValue = ((NumberType)(atoi(newString.substr(0, newString.length()-1).c_str()))).Value()+273;
-		}
-		else if (newString[newString.length()-1] == 'F' && asdf == TypeNumber)
-		{
-			newValue = (int)((((NumberType)(atoi(newString.substr(0, newString.length()-1).c_str()))).Value()-32.0f)*5/9+273.15f);
-		}
-		else
-		{
-			newValue = GetParticleType(newString);
-			if (newValue < 0 || newValue >= PT_NUM)
-				if (newString == "GOLD" || ((StringType)value).Value() == "gold")
-					throw GeneralException("No, GOLD will not be an element");
-				else
-					throw GeneralException("Invalid element");
+			if (((StringType)value).Value() == "GOLD" || ((StringType)value).Value() == "gold")
+				throw GeneralException("No, GOLD will not be an element");
+			else
+				throw GeneralException("Invalid element");
 		}
 	}
 	else

@@ -575,7 +575,7 @@ void GameModel::SetSave(SaveInfo * newSave)
 			sim->grav->start_grav_async();
 		else
 			sim->grav->stop_grav_async();
-		sim->SetEdgeMode(saveData->edgeMode);
+		sim->SetEdgeMode(0);
 		sim->clear_sim();
 		ren->ClearAccumulation();
 		sim->Load(saveData);
@@ -620,7 +620,7 @@ void GameModel::SetSaveFile(SaveFile * newSave)
 		{
 			sim->grav->stop_grav_async();
 		}
-		sim->SetEdgeMode(saveData->edgeMode);
+		sim->SetEdgeMode(0);
 		sim->clear_sim();
 		ren->ClearAccumulation();
 		sim->Load(saveData);
@@ -848,8 +848,9 @@ void GameModel::ClearSimulation()
 	sim->air->airMode = 0;
 	sim->legacy_enable = false;
 	sim->water_equal_test = false;
-	sim->clear_sim();
 	sim->SetEdgeMode(edgeMode);
+
+	sim->clear_sim();
 	ren->ClearAccumulation();
 
 	notifySaveChanged();

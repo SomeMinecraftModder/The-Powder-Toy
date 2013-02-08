@@ -546,7 +546,7 @@ bool GameController::MouseUp(int x, int y, unsigned button)
 				(*iter).pos(signx, signy, signw, signh);
 				if (x>=signx && x<=signx+signw && y>=signy && y<=signy+signh)
 				{
-					if (sregexp((*iter).text.c_str(), "^{[c|t]:[0-9]*|.*}$")==0 || sregexp((*iter).text.c_str(), "^{s:.*|.*}$")==0)
+					if (sregexp((*iter).text.c_str(), "^{[c|t]:[0-9]*|.*}$")==0)
 					{
 						const char * signText = (*iter).text.c_str();
 						char buff[256];
@@ -559,21 +559,16 @@ bool GameController::MouseUp(int x, int y, unsigned button)
 
 						buff[sldr-3] = '\0';
 
-						if ((*iter).text.c_str()[1] == 's')
-							OpenSearch(buff);
-						else
+						int tempSaveID = format::StringToNumber<int>(std::string(buff));
+						if (tempSaveID)
 						{
-							int tempSaveID = format::StringToNumber<int>(std::string(buff));
-							if (tempSaveID)
+							if ((*iter).text.c_str()[1] == 'c')
+								OpenSavePreview(tempSaveID, 0);
+							else if ((*iter).text.c_str()[1] == 't')
 							{
-								if ((*iter).text.c_str()[1] == 'c')
-									OpenSavePreview(tempSaveID, 0);
-								else if ((*iter).text.c_str()[1] == 't')
-								{
-									char url[256];
-									sprintf(url, "http://powdertoy.co.uk/Discussions/Thread/View.html?Thread=%i", tempSaveID);
-									OpenURI(url);
-								}
+								char url[256];
+								sprintf(url, "http://powdertoy.co.uk/Discussions/Thread/View.html?Thread=%i", tempSaveID);
+								OpenURI(url);
 							}
 						}
 						break;
@@ -950,12 +945,10 @@ void GameController::SetActiveTool(int toolSelection, Tool * tool)
 	}
 }
 
-void GameController::OpenSearch(std::string searchText)
+void GameController::OpenSearch()
 {
 	if(!search)
-		search = new SearchController(new SearchCallback(this), searchText);
-	if (searchText.length())
-		search->SetSearch(searchText);
+		search = new SearchController(new SearchCallback(this));
 	ui::Engine::Ref().ShowWindow(search->GetView());
 }
 
@@ -963,6 +956,12 @@ void GameController::OpenLocalSaveWindow(bool asCurrent)
 {
 	Simulation * sim = gameModel->GetSimulation();
 	GameSave * gameSave = sim->Save();
+	gameSave->paused = gameModel->GetPaused();
+	gameSave->gravityMode = sim->gravityMode;
+	gameSave->airMode = sim->air->airMode;
+	gameSave->legacyEnable = sim->legacy_enable;
+	gameSave->waterEEnabled = sim->water_equal_test;
+	gameSave->gravityEnable = sim->grav->ngrav_enable;
 	if(!gameSave)
 	{
 		new ErrorMessage("Error", "Unable to build save.");
@@ -1153,6 +1152,12 @@ void GameController::OpenSaveWindow()
 	{
 		Simulation * sim = gameModel->GetSimulation();
 		GameSave * gameSave = sim->Save();
+		gameSave->paused = gameModel->GetPaused();
+		gameSave->gravityMode = sim->gravityMode;
+		gameSave->airMode = sim->air->airMode;
+		gameSave->legacyEnable = sim->legacy_enable;
+		gameSave->waterEEnabled = sim->water_equal_test;
+		gameSave->gravityEnable = sim->grav->ngrav_enable;
 		if(!gameSave)
 		{
 			new ErrorMessage("Error", "Unable to build save.");
@@ -1198,6 +1203,12 @@ void GameController::SaveAsCurrent()
 	{
 		Simulation * sim = gameModel->GetSimulation();
 		GameSave * gameSave = sim->Save();
+		gameSave->paused = gameModel->GetPaused();
+		gameSave->gravityMode = sim->gravityMode;
+		gameSave->airMode = sim->air->airMode;
+		gameSave->legacyEnable = sim->legacy_enable;
+		gameSave->waterEEnabled = sim->water_equal_test;
+		gameSave->gravityEnable = sim->grav->ngrav_enable;
 		if(!gameSave)
 		{
 			new ErrorMessage("Error", "Unable to build save.");

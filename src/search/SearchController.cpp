@@ -31,7 +31,7 @@ public:
 	}
 };
 
-SearchController::SearchController(ControllerCallback * callback, std::string query):
+SearchController::SearchController(ControllerCallback * callback):
 	activePreview(NULL),
 	HasExited(false),
 	nextQueryTime(0.0f),
@@ -43,7 +43,7 @@ SearchController::SearchController(ControllerCallback * callback, std::string qu
 	searchModel->AddObserver(searchView);
 	searchView->AttachController(this);
 
-	searchModel->UpdateSaveList(1, query);
+	searchModel->UpdateSaveList(1, "");
 
 	this->callback = callback;
 
@@ -193,11 +193,6 @@ void SearchController::OpenSave(int saveID, int saveDate)
 		delete activePreview;
 	activePreview = new PreviewController(saveID, saveDate, new OpenCallback(this));
 	ui::Engine::Ref().ShowWindow(activePreview->GetView());
-}
-
-void SearchController::SetSearch(std::string searchText)
-{
-	searchView->SetSearch(searchText);
 }
 
 void SearchController::ClearSelection()

@@ -392,8 +392,6 @@ void Element_PIPE::transfer_pipe_to_part(Particle *pipe, Particle *part)
 	part->life = pipe->tmp2;
 	part->tmp = pipe->pavg[0];
 	part->ctype = pipe->pavg[1];
-	part->dcolour = pipe->dcolour;
-	pipe->dcolour = 0;
 	pipe->tmp &= ~0xFF;
 
 	if (part->type != PT_PHOT && part->type != PT_ELEC && part->type != PT_NEUT)
@@ -405,6 +403,7 @@ void Element_PIPE::transfer_pipe_to_part(Particle *pipe, Particle *part)
 		part->ctype = 0x3FFFFFFF;
 	part->tmp2 = 0;
 	part->flags = 0;
+	part->dcolour = 0;
 }
 
 //#TPT-Directive ElementHeader Element_PIPE static void transfer_part_to_pipe(Particle *part, Particle *pipe)
@@ -415,7 +414,6 @@ void Element_PIPE::transfer_part_to_pipe(Particle *part, Particle *pipe)
 	pipe->tmp2 = part->life;
 	pipe->pavg[0] = part->tmp;
 	pipe->pavg[1] = part->ctype;
-	pipe->dcolour = part->dcolour;
 }
 
 //#TPT-Directive ElementHeader Element_PIPE static void transfer_pipe_to_pipe(Particle *src, Particle *dest)
@@ -426,8 +424,6 @@ void Element_PIPE::transfer_pipe_to_pipe(Particle *src, Particle *dest)
 	dest->tmp2 = src->tmp2;
 	dest->pavg[0] = src->pavg[0];
 	dest->pavg[1] = src->pavg[1];
-	dest->dcolour = src->dcolour;
-	src->dcolour = 0;
 	src->tmp &= ~0xFF;
 }
 

@@ -233,15 +233,10 @@ void SearchView::doSearch()
 		c->DoSearch(searchField->GetText());
 }
 
+
 void SearchView::clearSearch()
 {
 	searchField->SetText("");
-	c->DoSearch(searchField->GetText(), true);
-}
-
-void SearchView::SetSearch(std::string searchText)
-{
-	searchField->SetText(searchText);
 	c->DoSearch(searchField->GetText(), true);
 }
 

@@ -201,7 +201,7 @@ GameView::GameView():
 			if(v->CtrlBehaviour())
 				v->c->OpenLocalBrowse();
 			else
-				v->c->OpenSearch("");
+				v->c->OpenSearch();
 		}
 	};
 
@@ -291,8 +291,7 @@ GameView::GameView():
         DownVoteAction(GameView * _v) { v = _v; }
         void ActionCallback(ui::Button * sender)
         {
-			if(ConfirmPrompt::Blocking("Downvote", "Are you sure you want to vote down on this?", "Confirm"))
-        		v->c->Vote(-1);
+        	v->c->Vote(-1);
         }
     };
     downVoteButton = new ui::Button(ui::Point(currentX, Size.Y-16), ui::Point(15, 15), "", "Dislike this save");
@@ -1198,7 +1197,6 @@ void GameView::BeginStampSelection()
 
 void GameView::OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool alt)
 {
-	bool placingSave = false;
 	if(introText > 50)
 	{
 		introText = 50;
@@ -1240,100 +1238,43 @@ void GameView::OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool
 				break;
 			}
 		}
-		placingSave = true;
+		if(key != ' ')
+			return;
 	}
-	if (!placingSave) //disable opening interfaces when placing a save
-		switch(key)
-		{
-		case KEY_LALT:
-		case KEY_RALT:
-			drawSnap = true;
-			enableAltBehaviour();
-			break;
-		case KEY_LCTRL:
-		case KEY_RCTRL:
-			if(!isMouseDown)
-			{
-				if(drawModeReset)
-					drawModeReset = false;
-				else
-					drawPoint1 = currentMouse;
-				if(shift)
-					drawMode = DrawFill;
-				else
-					drawMode = DrawRect;
-			}
-			enableCtrlBehaviour();
-			break;
-		case KEY_LSHIFT:
-		case KEY_RSHIFT:
-			if(!isMouseDown)
-			{
-				if(drawModeReset)
-					drawModeReset = false;
-				else
-					drawPoint1 = currentMouse;
-				if(ctrl)
-					drawMode = DrawFill;
-				else
-					drawMode = DrawLine;
-			}
-			enableShiftBehaviour();
-			break;
-		case 'c':
-			if(ctrl)
-			{
-				selectMode = SelectCopy;
-				selectPoint1 = ui::Point(-1, -1);
-				infoTip = "\x0F\xEF\xEF\x10Select an area to copy";
-				infoTipPresence = 120;
-			}
-			break;
-		case 'x':
-			if(ctrl)
-			{
-				selectMode = SelectCut;
-				selectPoint1 = ui::Point(-1, -1);
-				infoTip = "\x0F\xEF\xEF\x10Select an area to cut";
-				infoTipPresence = 120;
-			}
-			break;
-		case 'v':
-			if(ctrl)
-			{
-				c->LoadClipboard();
-				selectPoint2 = ui::Point(-1, -1);
-				selectPoint1 = selectPoint2;
-			}
-			break;
-		case 'l':
-			c->LoadStamp();
-			selectPoint2 = ui::Point(-1, -1);
-			selectPoint1 = selectPoint2;
-			isMouseDown = false;
-			drawMode = DrawPoints;
-			break;
-		case 'k':
-			selectPoint2 = ui::Point(-1, -1);
-			selectPoint1 = selectPoint2;
-			c->OpenStamps();
-			break;
-		case ']':
-			if(zoomEnabled && !zoomCursorFixed)
-				c->AdjustZoomSize(1, !alt);
-			else
-				c->AdjustBrushSize(1, !alt, shiftBehaviour, ctrlBehaviour);
-			break;
-		case '[':
-			if(zoomEnabled && !zoomCursorFixed)
-				c->AdjustZoomSize(-1, !alt);
-			else
-				c->AdjustBrushSize(-1, !alt, shiftBehaviour, ctrlBehaviour);
-			break;
-		}
-
-	switch (key)
+	switch(key)
 	{
+	case KEY_ALT:
+		drawSnap = true;
+		enableAltBehaviour();
+		break;
+	case KEY_CTRL:
+		if(!isMouseDown)
+		{
+			if(drawModeReset)
+				drawModeReset = false;
+			else
+				drawPoint1 = currentMouse;
+			if(shift)
+				drawMode = DrawFill;
+			else
+				drawMode = DrawRect;
+		}
+		enableCtrlBehaviour();
+		break;
+	case KEY_SHIFT:
+		if(!isMouseDown)
+		{
+			if(drawModeReset)
+				drawModeReset = false;
+			else
+				drawPoint1 = currentMouse;
+			if(ctrl)
+				drawMode = DrawFill;
+			else
+				drawMode = DrawLine;
+		}
+		enableShiftBehaviour();
+		break;
 	case ' ': //Space
 		c->SetPaused();
 		break;
@@ -1422,6 +1363,56 @@ void GameView::OnKeyPress(int key, Uint16 character, bool shift, bool ctrl, bool
 		else
 			c->ResetAir();
 		break;
+	case 'c':
+		if(ctrl)
+		{
+			selectMode = SelectCopy;
+			selectPoint1 = ui::Point(-1, -1);
+			infoTip = "\x0F\xEF\xEF\x10Select an area to copy";
+			infoTipPresence = 120;
+		}
+		break;
+	case 'x':
+		if(ctrl)
+		{
+			selectMode = SelectCut;
+			selectPoint1 = ui::Point(-1, -1);
+			infoTip = "\x0F\xEF\xEF\x10Select an area to cut";
+			infoTipPresence = 120;
+		}
+		break;
+	case 'v':
+		if(ctrl)
+		{
+			c->LoadClipboard();
+			selectPoint2 = ui::Point(-1, -1);
+			selectPoint1 = selectPoint2;
+		}
+		break;
+	case 'l':
+		c->LoadStamp();
+		selectPoint2 = ui::Point(-1, -1);
+		selectPoint1 = selectPoint2;
+		isMouseDown = false;
+		drawMode = DrawPoints;
+		break;
+	case 'k':
+		selectPoint2 = ui::Point(-1, -1);
+		selectPoint1 = selectPoint2;
+		c->OpenStamps();
+		break;
+	case ']':
+		if(zoomEnabled && !zoomCursorFixed)
+			c->AdjustZoomSize(1, !alt);
+		else
+			c->AdjustBrushSize(1, !alt, shiftBehaviour, ctrlBehaviour);
+		break;
+	case '[':
+		if(zoomEnabled && !zoomCursorFixed)
+			c->AdjustZoomSize(-1, !alt);
+		else
+			c->AdjustBrushSize(-1, !alt, shiftBehaviour, ctrlBehaviour);
+		break;
 	case 'i':
 		if(ctrl)
 			c->Install();
@@ -1446,17 +1437,14 @@ void GameView::OnKeyRelease(int key, Uint16 character, bool shift, bool ctrl, bo
 		drawModeReset = true;
 	switch(key)
 	{
-	case KEY_LALT:
-	case KEY_RALT:
+	case KEY_ALT:
 		drawSnap = false;
 		disableAltBehaviour();
 		break;
-	case KEY_LCTRL:
-	case KEY_RCTRL:
+	case KEY_CTRL:
 		disableCtrlBehaviour();
 		break;
-	case KEY_LSHIFT:
-	case KEY_RSHIFT:
+	case KEY_SHIFT:
 		disableShiftBehaviour();
 		break;
 	case 'z':
@@ -2066,7 +2054,7 @@ void GameView::OnDraw()
 				sampleInfo << "#" << sample.ParticleID << ", ";
 			}
 			sampleInfo << "X:" << sample.PositionX << " Y:" << sample.PositionY;
-			if (sample.Gravity)
+			if (std::abs(sample.Gravity) > 0.1f)
 				sampleInfo << " GX: " << sample.GravityVelocityX << " GY: " << sample.GravityVelocityY;
 
 			textWidth = Graphics::textwidth((char*)sampleInfo.str().c_str());
@@ -2079,14 +2067,11 @@ void GameView::OnDraw()
 #ifndef DEBUG //In debug mode, the Engine will draw FPS and other info instead
 		std::stringstream fpsInfo;
 		fpsInfo.precision(2);
-		if (showDebug)
-		{
 #ifdef SNAPSHOT
-			fpsInfo << "Snapshot " << SNAPSHOT_ID << ", ";
+		fpsInfo << "Snapshot " << SNAPSHOT_ID << ", ";
 #elif defined(BETA)
-			fpsInfo << "Beta " << SAVE_VERSION << "." << MINOR_VERSION << "." << BUILD_NUM << ", ";
+		fpsInfo << "Beta " << SAVE_VERSION << "." << MINOR_VERSION << "." << BUILD_NUM << ", ";
 #endif
-		}
 		fpsInfo << "FPS: " << std::fixed << ui::Engine::Ref().GetFps();
 
 		if (showDebug)

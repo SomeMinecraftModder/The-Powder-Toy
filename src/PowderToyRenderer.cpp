@@ -17,7 +17,6 @@
 #include "simulation/Simulation.h"
 
 
-
 void EngineProcess() {}
 void ClipboardPush(char * text) {}
 char * ClipboardPull() {}

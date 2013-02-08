@@ -212,7 +212,7 @@ void LocalBrowserView::OnKeyPress(int key, Uint16 character, bool shift, bool ct
 {
 	if(key == KEY_ESCAPE)
 		c->Exit();
-	if (key == KEY_LCTRL || key == KEY_RCTRL)
+	if (key == KEY_CTRL)
 		c->SetMoveToFront(false);
 	else
 		c->SetMoveToFront(true);

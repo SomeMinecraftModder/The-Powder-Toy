@@ -26,7 +26,7 @@ private:
 public:
 	class OpenCallback;
 	bool HasExited;
-	SearchController(ControllerCallback * callback = NULL, std::string query = "");
+	SearchController(ControllerCallback * callback = NULL);
 	~SearchController();
 	SearchView * GetView() { return searchView; }
 	void Exit();
@@ -39,7 +39,6 @@ public:
 	void Selected(int saveID, bool selected);
 	void OpenSave(int saveID);
 	void OpenSave(int saveID, int saveDate);
-	void SetSearch(std::string searchText);
 	void Update();
 	void ClearSelection();
 	void RemoveSelected();

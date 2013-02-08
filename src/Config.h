@@ -34,8 +34,6 @@
 #define SNAPSHOT_ID 0
 #endif
 
-//#define IGNORE_UPDATES //use to not get any update notifications, for mods
-
 #ifndef STABLE
 #ifndef BETA
 #define BETA

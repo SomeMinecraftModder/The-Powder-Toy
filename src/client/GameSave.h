@@ -52,7 +52,6 @@ public:
 	bool paused;
 	int gravityMode;
 	int airMode;
-	int edgeMode;
 	
 	//Signs
 	std::vector<sign> signs;
