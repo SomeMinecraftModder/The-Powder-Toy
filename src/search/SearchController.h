@@ -45,6 +45,7 @@ public:
 	void RemoveSelected();
 	void UnpublishSelected();
 	void FavouriteSelected();
+	void ReleaseLoadedSave();
 	SaveInfo * GetLoadedSave();
 };
 

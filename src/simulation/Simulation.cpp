@@ -24,8 +24,8 @@
 #include "Snapshot.h"
 //#include "StorageClasses.h"
 
-#undef LUACONSOLE
-//#include "cat/LuaScriptHelper.h"
+#include "cat/LuaScriptInterface.h"
+#include "cat/LuaScriptHelper.h"
 
 int Simulation::Load(GameSave * save)
 {
@@ -135,6 +135,10 @@ int Simulation::Load(int fullX, int fullY, GameSave * save)
 					break;
 				}
 			}
+		}
+		if (parts[i].pavg[0] || parts[i].pavg[1])
+		{
+			parts[i].pavg[0] = parts[i].pavg[1] = 0;
 		}
 	}
 	parts_lastActiveIndex = NPART-1;
@@ -294,6 +298,10 @@ Snapshot * Simulation::CreateSnapshot()
 	snap->ElecMap.insert(snap->ElecMap.begin(), &emap[0][0], &emap[0][0]+((XRES/CELL)*(YRES/CELL)));
 	snap->FanVelocityX.insert(snap->FanVelocityX.begin(), &fvx[0][0], &fvx[0][0]+((XRES/CELL)*(YRES/CELL)));
 	snap->FanVelocityY.insert(snap->FanVelocityY.begin(), &fvy[0][0], &fvy[0][0]+((XRES/CELL)*(YRES/CELL)));
+	snap->stickmen.push_back(player2);
+	snap->stickmen.push_back(player);
+	snap->stickmen.insert(snap->stickmen.begin(), &fighters[0], &fighters[255]);
+	snap->signs = signs;
 	return snap;
 }
 
@@ -315,6 +323,10 @@ void Simulation::Restore(const Snapshot & snap)
 	std::copy(snap.ElecMap.begin(), snap.ElecMap.end(), &emap[0][0]);
 	std::copy(snap.FanVelocityX.begin(), snap.FanVelocityX.end(), &fvx[0][0]);
 	std::copy(snap.FanVelocityY.begin(), snap.FanVelocityY.end(), &fvy[0][0]);
+	std::copy(snap.stickmen.begin(), snap.stickmen.end()-2, &fighters[0]);
+	player = snap.stickmen[snap.stickmen.size()-1];
+	player2 = snap.stickmen[snap.stickmen.size()-2];
+	signs = snap.signs;
 }
 
 /*int Simulation::Load(unsigned char * data, int dataLength)
@@ -341,9 +353,9 @@ void Simulation::clear_area(int area_x, int area_y, int area_w, int area_h)
 {
 	int cx = 0;
 	int cy = 0;
-	for (cy=0; cy<area_h; cy++)
+	for (cy=0; cy<=area_h; cy++)
 	{
-		for (cx=0; cx<area_w; cx++)
+		for (cx=0; cx<=area_w; cx++)
 		{
 			if(bmap[(cy+area_y)/CELL][(cx+area_x)/CELL] == WL_GRAV)
 				gravWallChanged = true;
@@ -352,7 +364,7 @@ void Simulation::clear_area(int area_x, int area_y, int area_w, int area_h)
 			delete_part(cx+area_x, cy+area_y, 0);
 		}
 	}
-	for(int i = 0; i < signs.size(); i++)
+	for(int i = 0; i < MAXSIGNS && i < signs.size(); i++)
 	{
 		if(signs[i].text.length() && signs[i].x >= area_x && signs[i].y >= area_y && signs[i].x <= area_x+area_w && signs[i].y <= area_y+area_h)
 		{
@@ -838,7 +850,10 @@ int Simulation::flood_water(int x, int y, int i, int originaly, int check)
 	// fill span
 	for (x=x1; x<=x2; x++)
 	{
-		parts[pmap[y][x]>>8].tmp2 = !check;//flag it as checked, maybe shouldn't use .tmp2
+		if (check)
+			parts[pmap[y][x]>>8].flags &= ~FLAG_WATEREQUAL;//flag it as checked (different from the original particle's checked flag)
+		else
+			parts[pmap[y][x]>>8].flags |= FLAG_WATEREQUAL;
 		//check above, maybe around other sides too?
 		if ( ((y-1) > originaly) && !pmap[y-1][x] && eval_move(parts[i].type, x, y-1, NULL))
 		{
@@ -855,12 +870,12 @@ int Simulation::flood_water(int x, int y, int i, int originaly, int check)
 
 	if (y>=CELL+1)
 		for (x=x1; x<=x2; x++)
-			if ((elements[(pmap[y-1][x]&0xFF)].Falldown)==2 && parts[pmap[y-1][x]>>8].tmp2 == check)
+			if ((elements[(pmap[y-1][x]&0xFF)].Falldown)==2 && (parts[pmap[y-1][x]>>8].flags & FLAG_WATEREQUAL) == check)
 				if (!flood_water(x, y-1, i, originaly, check))
 					return 0;
 	if (y<YRES-CELL-1)
 		for (x=x1; x<=x2; x++)
-			if ((elements[(pmap[y+1][x]&0xFF)].Falldown)==2 && parts[pmap[y+1][x]>>8].tmp2 == check)
+			if ((elements[(pmap[y+1][x]&0xFF)].Falldown)==2 && (parts[pmap[y+1][x]>>8].flags & FLAG_WATEREQUAL) == check)
 				if (!flood_water(x, y+1, i, originaly, check))
 					return 0;
 	return 1;
@@ -1963,6 +1978,7 @@ void Simulation::clear_sim(void)
 	memset(portalp, 0, sizeof(portalp));
 	memset(fighters, 0, sizeof(fighters));
 	std::fill(elementCount, elementCount+PT_NUM, 0);
+	elementRecount = true;
 	fighcount = 0;
 	player.spwn = 0;
 	player2.spwn = 0;
@@ -1975,7 +1991,10 @@ void Simulation::clear_sim(void)
 	if(grav)
 		grav->Clear();
 	if(air)
+	{
 		air->Clear();
+		air->ClearAirH();
+	}
 	SetEdgeMode(edgeMode);
 }
 
@@ -2084,6 +2103,7 @@ void Simulation::init_can_move()
 	can_move[PT_ELEC][PT_DEUT] = 1;
 	can_move[PT_THDR][PT_THDR] = 2;
 	can_move[PT_EMBR][PT_EMBR] = 2;
+	can_move[PT_TRON][PT_SWCH] = 3;
 }
 
 /*
@@ -2117,7 +2137,7 @@ int Simulation::eval_move(int pt, int nx, int ny, unsigned *rr)
 			if (pv[ny/CELL][nx/CELL]>4.0f || pv[ny/CELL][nx/CELL]<-4.0f) result = 2;
 			else result = 0;
 		}
-		if ((r&0xFF)==PT_PVOD)
+		else if ((r&0xFF)==PT_PVOD)
 		{
 			if (parts[r>>8].life == 10)
 			{
@@ -2128,12 +2148,19 @@ int Simulation::eval_move(int pt, int nx, int ny, unsigned *rr)
 			}
 			else result = 0;
 		}
-		if ((r&0xFF)==PT_VOID)
+		else if ((r&0xFF)==PT_VOID)
 		{
 			if(!parts[r>>8].ctype || (parts[r>>8].ctype==pt)!=(parts[r>>8].tmp&1))
 				result = 1;
 			else
 				result = 0;
+		}
+		else if (pt == PT_TRON && (r&0xFF) == PT_SWCH)
+		{
+			if (parts[r>>8].life >= 10)
+				return 2;
+			else
+				return 0;
 		}
 	}
 	if (bmap[ny/CELL][nx/CELL])
@@ -2593,12 +2620,8 @@ void Simulation::detach(int i)
 
 void Simulation::kill_part(int i)//kills particle number i
 {
-	int x, y;
-
-	// Remove from pmap even if type==0, otherwise infinite recursion occurs when flood fill deleting
-	// a particle which sets type to 0 without calling kill_part (such as LIFE)
-	x = (int)(parts[i].x+0.5f);
-	y = (int)(parts[i].y+0.5f);
+	int x = (int)(parts[i].x+0.5f);
+	int y = (int)(parts[i].y+0.5f);
 	if (x>=0 && y>=0 && x<XRES && y<YRES) {
 		if ((pmap[y][x]>>8)==i)
 			pmap[y][x] = 0;
@@ -2615,16 +2638,16 @@ void Simulation::kill_part(int i)//kills particle number i
 	{
 		player.spwn = 0;
 	}
-	if (parts[i].type == PT_STKM2)
+	else if (parts[i].type == PT_STKM2)
 	{
 		player2.spwn = 0;
 	}
-	if (parts[i].type == PT_FIGH)
+	else if (parts[i].type == PT_FIGH)
 	{
 		fighters[(unsigned char)parts[i].tmp].spwn = 0;
 		fighcount--;
 	}
-	if (parts[i].type == PT_SOAP)
+	else if (parts[i].type == PT_SOAP)
 	{
 		detach(i);
 	}
@@ -2636,22 +2659,27 @@ void Simulation::kill_part(int i)//kills particle number i
 
 void Simulation::part_change_type(int i, int x, int y, int t)//changes the type of particle number i, to t.  This also changes pmap at the same time.
 {
-	if (x<0 || y<0 || x>=XRES || y>=YRES || i>=NPART || t<0 || t>=PT_NUM)
+	if (x<0 || y<0 || x>=XRES || y>=YRES || i>=NPART || t<0 || t>=PT_NUM || !parts[i].type)
 		return;
 	if (!elements[t].Enabled)
 		t = PT_NONE;
+	if (t == PT_NONE)
+	{
+		kill_part(i);
+		return;
+	}
 
 	if (parts[i].type == PT_STKM)
 		player.spwn = 0;
-
-	if (parts[i].type == PT_STKM2)
+	else if (parts[i].type == PT_STKM2)
 		player2.spwn = 0;
-
-	if (parts[i].type == PT_FIGH)
+	else if (parts[i].type == PT_FIGH)
 	{
 		fighters[(unsigned char)parts[i].tmp].spwn = 0;
 		fighcount--;
 	}
+	else if (parts[i].type == PT_SOAP)
+		detach(i);
 
 	parts[i].type = t;
 	if (elements[t].Properties & TYPE_ENERGY)
@@ -2808,24 +2836,23 @@ int Simulation::create_part(int p, int x, int y, int tv)
 	{
 		if (pmap[y][x])
 		{
+			int drawOn = pmap[y][x]&0xFF;
 			if ((
-				((pmap[y][x]&0xFF)==PT_STOR&&!(elements[t].Properties&TYPE_SOLID))||
-				(pmap[y][x]&0xFF)==PT_CLNE||
-				(pmap[y][x]&0xFF)==PT_BCLN||
-				(pmap[y][x]&0xFF)==PT_CONV||
-				((pmap[y][x]&0xFF)==PT_PCLN&&t!=PT_PSCN&&t!=PT_NSCN)||
-				((pmap[y][x]&0xFF)==PT_PBCN&&t!=PT_PSCN&&t!=PT_NSCN)
+				(drawOn == PT_STOR && !(elements[t].Properties&TYPE_SOLID)) ||
+				drawOn==PT_CLNE ||
+				drawOn==PT_BCLN ||
+				drawOn==PT_CONV ||
+				drawOn==PT_CRAY ||
+				(drawOn==PT_PCLN&&t!=PT_PSCN&&t!=PT_NSCN) ||
+				(drawOn==PT_PBCN&&t!=PT_PSCN&&t!=PT_NSCN)
 			)&&(
-				t!=PT_CLNE&&t!=PT_PCLN&&
-				t!=PT_BCLN&&t!=PT_STKM&&
-				t!=PT_STKM2&&t!=PT_PBCN&&
-				t!=PT_STOR&&t!=PT_FIGH)
+				t != PT_CLNE && t != PT_CRAY && t != PT_PCLN && t != PT_BCLN && t != PT_STKM && t != PT_STKM2 && t != PT_PBCN && t != PT_STOR && t != PT_FIGH && t != PT_CONV)
 			)
 			{
 				parts[pmap[y][x]>>8].ctype = t;
-				if (t==PT_LIFE && v<NGOLALT && (pmap[y][x]&0xFF)!=PT_STOR) parts[pmap[y][x]>>8].tmp = v;
+				if (t == PT_LIFE && v < NGOLALT && drawOn != PT_STOR) parts[pmap[y][x]>>8].tmp = v;
 			}
-			else if ((pmap[y][x]&0xFF) == PT_DTEC && (pmap[y][x]&0xFF) != t)
+			else if (drawOn == PT_DTEC && drawOn != t)
 			{
 				parts[pmap[y][x]>>8].ctype = t;
 				if (t==PT_LIFE && v<NGOLALT)
@@ -2855,6 +2882,24 @@ int Simulation::create_part(int p, int x, int y, int tv)
 			pmap[oldY][oldX] = 0;
 		if ((photons[oldY][oldX]>>8)==p)
 			photons[oldY][oldX] = 0;
+
+		if (parts[p].type == PT_STKM)
+		{
+			player.spwn = 0;
+		}
+		else if (parts[p].type == PT_STKM2)
+		{
+			player2.spwn = 0;
+		}
+		else if (parts[p].type == PT_FIGH)
+		{
+			fighters[(unsigned char)parts[i].tmp].spwn = 0;
+			fighcount--;
+		}
+		else if (parts[p].type == PT_SOAP)
+		{
+			detach(i);
+		}
 		i = p;
 	}
 
@@ -3013,7 +3058,6 @@ int Simulation::create_part(int p, int x, int y, int tv)
 					return -1;
 				}
 				create_part(-3,x,y,PT_SPAWN);
-				elementCount[PT_SPAWN] = 1;
 				break;
 			case PT_STKM2:
 				if (player2.spwn==0)
@@ -3035,7 +3079,6 @@ int Simulation::create_part(int p, int x, int y, int tv)
 					return -1;
 				}
 				create_part(-3,x,y,PT_SPAWN2);
-				elementCount[PT_SPAWN2] = 1;
 				break;
 			case PT_BIZR: case PT_BIZRG: case PT_BIZRS:
 				parts[i].ctype = 0x47FFFF;
@@ -3385,11 +3428,9 @@ void Simulation::update_particles_i(int start, int inc)
     	}
     }
 
-	if (ISLOVE || ISLOLZ) //LOVE and LOLZ element handling
+	if (elementCount[PT_LOVE] > 0 || elementCount[PT_LOLZ] > 0) //LOVE and LOLZ element handling
 	{
 		int nx, nnx, ny, nny, r, rt;
-		ISLOVE = 0;
-		ISLOLZ = 0;
 		for (ny=0; ny<YRES-4; ny++)
 		{
 			for (nx=0; nx<XRES-4; nx++)
@@ -3403,11 +3444,11 @@ void Simulation::update_particles_i(int start, int inc)
 					kill_part(r>>8);
 				else if (parts[r>>8].type==PT_LOVE)
 				{
-					love[nx/9][ny/9] = 1;
+					Element_LOVE::love[nx/9][ny/9] = 1;
 				}
 				else if (parts[r>>8].type==PT_LOLZ)
 				{
-					lolz[nx/9][ny/9] = 1;
+					Element_LOLZ::lolz[nx/9][ny/9] = 1;
 				}
 			}
 		}
@@ -3415,7 +3456,7 @@ void Simulation::update_particles_i(int start, int inc)
 		{
 			for (ny=9; ny<=YRES-7; ny++)
 			{
-				if (love[nx/9][ny/9]==1)
+				if (Element_LOVE::love[nx/9][ny/9]==1)
 				{
 					for ( nnx=0; nnx<9; nnx++)
 						for ( nny=0; nny<9; nny++)
@@ -3432,8 +3473,8 @@ void Simulation::update_particles_i(int start, int inc)
 							}
 						}
 				}
-				love[nx/9][ny/9]=0;
-				if (lolz[nx/9][ny/9]==1)
+				Element_LOVE::love[nx/9][ny/9]=0;
+				if (Element_LOLZ::lolz[nx/9][ny/9]==1)
 				{
 					for ( nnx=0; nnx<9; nnx++)
 						for ( nny=0; nny<9; nny++)
@@ -3451,7 +3492,7 @@ void Simulation::update_particles_i(int start, int inc)
 							}
 						}
 				}
-				lolz[nx/9][ny/9]=0;
+				Element_LOLZ::lolz[nx/9][ny/9]=0;
 			}
 		}
 	}
@@ -3576,7 +3617,7 @@ void Simulation::update_particles_i(int start, int inc)
 		ISWIRE--;
 	}
 
-	bool elementRecount = !(currentTick%180);
+	elementRecount |= !(currentTick%180);
 	if(elementRecount)
 	{
 		std::fill(elementCount, elementCount+PT_NUM, 0);
@@ -3592,8 +3633,8 @@ void Simulation::update_particles_i(int start, int inc)
 				continue;
 			}
 
-
-			elementCount[t]++;
+			if(elementRecount)
+				elementCount[t]++;
 
 			elem_properties = elements[t].Properties;
 			if (parts[i].life>0 && (elem_properties&PROP_LIFE_DEC))
@@ -3705,7 +3746,7 @@ void Simulation::update_particles_i(int start, int inc)
 				pGravY += gravy[(y/CELL)*(XRES/CELL)+(x/CELL)];
 			}
 			//velocity updates for the particle
-			if (!(parts[i].flags&FLAG_MOVABLE))
+			if (t != PT_SPNG || !(parts[i].flags&FLAG_MOVABLE))
 			{
 				parts[i].vx *= elements[t].Loss;
 				parts[i].vy *= elements[t].Loss;
@@ -4132,13 +4173,9 @@ void Simulation::update_particles_i(int start, int inc)
 			}
 
 			//call the particle update function, if there is one
-#ifdef LUACONSOLE
 			if (elements[t].Update && lua_el_mode[t] != 2)
-#else
-			if (elements[t].Update)
-#endif
 			{
-				if ((*(elements[t].Update))(this, i,x,y,surround_space,nt, parts, pmap))
+				if ((*(elements[t].Update))(this, i, x, y, surround_space, nt, parts, pmap))
 					continue;
 				else if (t==PT_WARP)
 				{
@@ -4147,17 +4184,14 @@ void Simulation::update_particles_i(int start, int inc)
 					y = (int)(parts[i].y+0.5f);
 				}
 			}
-#ifdef LUACONSOLE
 			if(lua_el_mode[t])
 			{
-				if(luacon_part_update(t,i,x,y,surround_space,nt))
+				if(luacon_elementReplacement(this, i, x, y, surround_space, nt, parts, pmap))
 					continue;
 				// Need to update variables, in case they've been changed by Lua
 				x = (int)(parts[i].x+0.5f);
 				y = (int)(parts[i].y+0.5f);
 			}
-#endif
-
 
 			if(legacy_enable)//if heat sim is off
 				Element::legacyUpdate(this, i,x,y,surround_space,nt, parts, pmap);
@@ -4370,7 +4404,7 @@ killed:
 							kill_part(i);
 						continue;
 					}
-					if (!(parts[i].ctype&0x3FFFFFFF)&&t!=PT_NEUT&&t!=PT_ELEC) {
+					if (!(parts[i].ctype&0x3FFFFFFF) && t == PT_PHOT) {
 						kill_part(i);
 						continue;
 					}
@@ -4409,7 +4443,7 @@ killed:
 			{
 				if (water_equal_test && elements[t].Falldown == 2 && 1>= rand()%400)//checking stagnant is cool, but then it doesn't update when you change it later.
 				{
-					if (!flood_water(x,y,i,y, parts[i].tmp2))
+					if (!flood_water(x,y,i,y, parts[i].flags&FLAG_WATEREQUAL))
 						goto movedone;
 				}
 				// liquids and powders
@@ -4688,12 +4722,11 @@ void Simulation::update_particles()//doesn't update the particles themselves, bu
 			gravy = grav->gravy;
 			gravp = grav->gravp;
 			gravmap = grav->gravmap;
-
-			if(gravWallChanged)
-			{
-				grav->gravity_mask();
-				gravWallChanged = false;
-			}
+		}
+		if(gravWallChanged)
+		{
+			grav->gravity_mask();
+			gravWallChanged = false;
 		}
 		if(emp_decor>0)
 			emp_decor -= emp_decor/25+2;
@@ -4806,11 +4839,20 @@ Simulation::~Simulation()
 
 Simulation::Simulation():
 	sys_pause(0),
-	framerender(false),
+	framerender(0),
+	aheat_enable(0),
+	legacy_enable(0),
+	gravityMode(0),
+	edgeMode(0),
+	water_equal_test(0),
 	pretty_powder(0),
-	sandcolour_frame(0)
+	sandcolour_frame(0),
+	emp_decor(0),
+	lighting_recreate(0),
+	force_stacking_check(0),
+	ISWIRE(0),
+	VINE_MODE(0)
 {
-    
     int tportal_rx[] = {-1, 0, 1, 1, 1, 0,-1,-1};
     int tportal_ry[] = {-1,-1,-1, 0, 1, 1, 1, 0};
     
@@ -4819,6 +4861,7 @@ Simulation::Simulation():
 
     currentTick = 0;
     std::fill(elementCount, elementCount+PT_NUM, 0);
+    elementRecount = true;
 
 	//Create and attach gravity simulation
 	grav = new Gravity();

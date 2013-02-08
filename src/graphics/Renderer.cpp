@@ -15,6 +15,8 @@
 #include "simulation/Elements.h"
 #include "simulation/ElementGraphics.h"
 #include "simulation/Air.h"
+#include "cat/LuaScriptInterface.h"
+#include "cat/LuaScriptHelper.h"
 extern "C"
 {
 #include "hmap.h"
@@ -1158,7 +1160,11 @@ void Renderer::render_parts()
 				{
 					if (elements[t].Graphics)
 					{
-						if ((*(elements[t].Graphics))(this, &(sim->parts[i]), nx, ny, &pixel_mode, &cola, &colr, &colg, &colb, &firea, &firer, &fireg, &fireb)) //That's a lot of args, a struct might be better
+						if (lua_gr_func[t])
+						{
+							luacon_graphicsReplacement(this, &(sim->parts[i]), nx, ny, &pixel_mode, &cola, &colr, &colg, &colb, &firea, &firer, &fireg, &fireb, i);
+						}
+						else if ((*(elements[t].Graphics))(this, &(sim->parts[i]), nx, ny, &pixel_mode, &cola, &colr, &colg, &colb, &firea, &firer, &fireg, &fireb)) //That's a lot of args, a struct might be better
 						{
 							graphicscache[t].isready = 1;
 							graphicscache[t].pixel_mode = pixel_mode;
@@ -1217,7 +1223,10 @@ void Renderer::render_parts()
 					fireg = colg = (unsigned char)color_data[caddress+1];
 					fireb = colb = (unsigned char)color_data[caddress+2];
 					cola = 255;
-					if(pixel_mode & (FIREMODE | PMODE_GLOW)) pixel_mode = (pixel_mode & ~(FIREMODE|PMODE_GLOW)) | PMODE_BLUR;
+					if(pixel_mode & (FIREMODE | PMODE_GLOW))
+						pixel_mode = (pixel_mode & ~(FIREMODE|PMODE_GLOW)) | PMODE_BLUR;
+					else if (!pixel_mode)
+						pixel_mode |= PMODE_FLAT;
 				}
 				else if(colour_mode & COLOUR_LIFE)
 				{
@@ -1228,7 +1237,10 @@ void Renderer::render_parts()
 						q = sim->parts[i].life;
 					colr = colg = colb = sin(gradv*q) * 100 + 128;
 					cola = 255;
-					if(pixel_mode & (FIREMODE | PMODE_GLOW)) pixel_mode = (pixel_mode & ~(FIREMODE|PMODE_GLOW)) | PMODE_BLUR;
+					if(pixel_mode & (FIREMODE | PMODE_GLOW))
+						pixel_mode = (pixel_mode & ~(FIREMODE|PMODE_GLOW)) | PMODE_BLUR;
+					else if (!pixel_mode)
+						pixel_mode |= PMODE_FLAT;
 				}
 				else if(colour_mode & COLOUR_BASC)
 				{
@@ -2618,9 +2630,14 @@ std::vector<unsigned int> Renderer::GetRenderMode()
 
 void Renderer::CompileDisplayMode()
 {
+	int old_display_mode = display_mode;
 	display_mode = 0;
 	for(int i = 0; i < display_modes.size(); i++)
 		display_mode |= display_modes[i];
+	if(!(display_mode & DISPLAY_PERS) && (old_display_mode & DISPLAY_PERS))
+	{
+		ClearAccumulation();
+	}
 }
 
 void Renderer::AddDisplayMode(unsigned int mode)

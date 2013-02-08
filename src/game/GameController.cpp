@@ -25,20 +25,10 @@
 #include "save/ServerSaveActivity.h"
 #include "interface/Keys.h"
 #include "simulation/Snapshot.h"
+#include "debug/DebugInfo.h"
+//#include "debug/ElementPopulation.h"
 
 using namespace std;
-
-class GameController::LoginCallback: public ControllerCallback
-{
-	GameController * cc;
-public:
-	LoginCallback(GameController * cc_) { cc = cc_; }
-	virtual void ControllerExit()
-	{
-		cc->gameModel->SetUser(cc->loginWindow->GetUser());
-	}
-};
-
 
 class GameController::SearchCallback: public ControllerCallback
 {
@@ -52,6 +42,7 @@ public:
 			try
 			{
 				cc->gameModel->SetSave(cc->search->GetLoadedSave());
+				cc->search->ReleaseLoadedSave();
 			}
 			catch(GameModelException & ex)
 			{
@@ -127,6 +118,8 @@ public:
 		if(cc->localBrowser->GetSave())
 		{
 			cc->gameModel->SetStamp(cc->localBrowser->GetSave()->GetGameSave());
+			if (cc->localBrowser->GetMoveToFront())
+				Client::Ref().MoveStampToFront(cc->localBrowser->GetSave()->GetName());
 			cc->LoadStamp();
 		}
 	}
@@ -154,8 +147,15 @@ GameController::GameController():
 	commandInterface = new LuaScriptInterface(this, gameModel);//new TPTScriptInterface();
 	((LuaScriptInterface*)commandInterface)->SetWindow(gameView);
 
+	commandInterface->OnBrushChanged(gameModel->GetBrushID(), gameModel->GetBrush()->GetRadius().X, gameModel->GetBrush()->GetRadius().X);
+	commandInterface->OnActiveToolChanged(0, gameModel->GetActiveTool(0));
+	commandInterface->OnActiveToolChanged(1, gameModel->GetActiveTool(1));
+	commandInterface->OnActiveToolChanged(2, gameModel->GetActiveTool(2));
+
 	//sim = new Simulation();
 	Client::Ref().AddListener(this);
+
+	//debugInfo.push_back(new ElementPopulationDebug(gameModel->GetSimulation()));
 }
 
 GameController::~GameController()
@@ -258,7 +258,7 @@ void GameController::Install()
 			{
 				if(Client::Ref().DoInstallation())
 				{
-					new InformationMessage("Install Success", "The installation completed without error");
+					new InformationMessage("Install Success", "The installation completed!");
 				}
 				else
 				{
@@ -268,7 +268,7 @@ void GameController::Install()
 		}
 		virtual ~InstallConfirmation() { }
 	};
-	new ConfirmPrompt("Install The Powder Toy", "You are about to install The Powder Toy onto this computer", new InstallConfirmation(this));
+	new ConfirmPrompt("Install The Powder Toy", "Do you wish to install The Powder Toy on this computer?\nThis allows you to open save files and saves directly from the website.", new InstallConfirmation(this));
 #else
 	new ErrorMessage("Cannot install", "You cannot install The Powder Toy on this platform");
 #endif
@@ -299,14 +299,14 @@ void GameController::AdjustBrushSize(int direction, bool logarithmic, bool xAxis
 		newSize = gameModel->GetBrush()->GetRadius() + ui::Point(direction * ((gameModel->GetBrush()->GetRadius().X/5)>0?gameModel->GetBrush()->GetRadius().X/5:1), direction * ((gameModel->GetBrush()->GetRadius().Y/5)>0?gameModel->GetBrush()->GetRadius().Y/5:1));
 	else
 		newSize = gameModel->GetBrush()->GetRadius() + ui::Point(direction, direction);
-	if(newSize.X<0)
-			newSize.X = 0;
-	if(newSize.Y<0)
-			newSize.Y = 0;
-	if(newSize.X>128)
-			newSize.X = 128;
-	if(newSize.Y>128)
-			newSize.Y = 128;
+	if(newSize.X < 0)
+		newSize.X = 0;
+	if(newSize.Y < 0)
+		newSize.Y = 0;
+	if(newSize.X > 200)
+		newSize.X = 200;
+	if(newSize.Y > 200)
+		newSize.Y = 200;
 
 	if(xAxis)
 		gameModel->GetBrush()->SetRadius(ui::Point(newSize.X, oldSize.Y));
@@ -691,7 +691,16 @@ void GameController::Tick()
 	if(firstTick)
 	{
 		((LuaScriptInterface*)commandInterface)->Init();
+		if(!Client::Ref().GetPrefBool("InstallCheck", false))
+		{
+			Client::Ref().SetPref("InstallCheck", true);
+			Install();
+		}
 		firstTick = false;
+	}
+	for(std::vector<DebugInfo*>::iterator iter = debugInfo.begin(), end = debugInfo.end(); iter != end; iter++)
+	{
+		(*iter)->Draw(ui::Point(10, 10));
 	}
 	commandInterface->OnTick();
 }
@@ -705,7 +714,15 @@ void GameController::Exit()
 
 void GameController::ResetAir()
 {
-	gameModel->GetSimulation()->air->Clear();
+	Simulation * sim = gameModel->GetSimulation();
+	sim->air->Clear();
+	for (int i = 0; i < NPART; i++)
+	{
+		if (sim->parts[i].type == PT_QRTZ || sim->parts[i].type == PT_GLAS)
+		{
+			sim->parts[i].pavg[0] = sim->parts[i].pavg[1] = 0;
+		}
+	}
 }
 
 void GameController::ResetSpark()
@@ -880,6 +897,11 @@ void GameController::ShowGravityGrid()
 	gameModel->UpdateQuickOptions();
 }
 
+void GameController::SetHudEnable(bool hudState)
+{
+	gameView->SetHudEnable(hudState);
+}
+
 void GameController::SetActiveColourPreset(int preset)
 {
 	gameModel->SetActiveColourPreset(preset);
@@ -908,8 +930,14 @@ void GameController::SetActiveMenu(Menu * menu)
 		gameModel->SetColourSelectorVisibility(false);
 }
 
+std::vector<Menu*> GameController::GetMenuList()
+{
+	return gameModel->GetMenuList();
+}
+
 void GameController::SetActiveTool(int toolSelection, Tool * tool)
 {
+	commandInterface->OnActiveToolChanged(toolSelection, tool);
 	gameModel->SetActiveTool(toolSelection, tool);
 	gameModel->GetRenderer()->gravityZonesEnabled = false;
 	gameModel->SetLastTool(tool);
@@ -919,7 +947,7 @@ void GameController::SetActiveTool(int toolSelection, Tool * tool)
 		{
 			gameModel->GetRenderer()->gravityZonesEnabled = true;
 		}
-	}	
+	}
 }
 
 void GameController::OpenSearch(std::string searchText)
@@ -988,6 +1016,15 @@ void GameController::OpenSavePreview(int saveID, int saveDate)
 	ui::Engine::Ref().ShowWindow(activePreview->GetView());
 }
 
+void GameController::OpenSavePreview()
+{
+	if(gameModel->GetSave())
+	{
+		activePreview = new PreviewController(gameModel->GetSave()->GetID(), new SaveOpenCallback(this));
+		ui::Engine::Ref().ShowWindow(activePreview->GetView());
+	}
+}
+
 void GameController::OpenLocalBrowse()
 {
 	class LocalSaveOpenCallback: public FileSelectedCallback
@@ -1007,7 +1044,7 @@ void GameController::OpenLocalBrowse()
 
 void GameController::OpenLogin()
 {
-	loginWindow = new LoginController(new LoginCallback(this));
+	loginWindow = new LoginController();
 	ui::Engine::Ref().ShowWindow(loginWindow->GetView());
 }
 
@@ -1081,7 +1118,16 @@ void GameController::ShowConsole()
 {
 	if(!console)
 		console = new ConsoleController(NULL, commandInterface);
-	ui::Engine::Ref().ShowWindow(console->GetView());
+	if (console->GetView() != ui::Engine::Ref().GetWindow())
+		ui::Engine::Ref().ShowWindow(console->GetView());
+}
+
+void GameController::HideConsole()
+{
+	if(!console)
+		return;
+	if (console->GetView() == ui::Engine::Ref().GetWindow())
+		ui::Engine::Ref().CloseWindow();
 }
 
 void GameController::OpenRenderOptions()
@@ -1120,7 +1166,7 @@ void GameController::OpenSaveWindow()
 				new ServerSaveActivity(tempSave, new SaveUploadedCallback(this));
 			}
 			else
-			{				
+			{
 				SaveInfo tempSave(0, 0, 0, 0, gameModel->GetUser().Username, "");
 				tempSave.SetGameSave(gameSave);
 				new ServerSaveActivity(tempSave, new SaveUploadedCallback(this));
@@ -1165,7 +1211,7 @@ void GameController::SaveAsCurrent()
 				new ServerSaveActivity(tempSave, true, new SaveUploadedCallback(this));
 			}
 			else
-			{				
+			{
 				SaveInfo tempSave(0, 0, 0, 0, gameModel->GetUser().Username, "");
 				tempSave.SetGameSave(gameSave);
 				new ServerSaveActivity(tempSave, true, new SaveUploadedCallback(this));
@@ -1243,6 +1289,29 @@ std::string GameController::WallName(int type)
 		return "";
 }
 
+void GameController::NotifyAuthUserChanged(Client * sender)
+{
+	User newUser = sender->GetAuthUser();
+	gameModel->SetUser(newUser);
+}
+
+void GameController::NotifyNewNotification(Client * sender, std::pair<std::string, std::string> notification)
+{
+	class LinkNotification : public Notification
+	{
+		std::string link;
+	public:
+		LinkNotification(std::string link_, std::string message) : link(link_), Notification(message) {}
+		virtual ~LinkNotification() {}
+
+		virtual void Action()
+		{
+			OpenURI(link);
+		}
+	};
+	gameModel->AddNotification(new LinkNotification(notification.second, notification.first));
+}
+
 void GameController::NotifyUpdateAvailable(Client * sender)
 {
 	class UpdateConfirmation: public ConfirmDialogueCallback {
@@ -1312,4 +1381,3 @@ void GameController::RunUpdater()
 	Exit();
 	new UpdateActivity();
 }
-
