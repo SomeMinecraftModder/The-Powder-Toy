@@ -56,6 +56,13 @@ Sign::Sign(std::string text, int x, int y, Justification justification):
 	SetText(text);
 }
 
+Sign::Sign(Sign & sign):
+	ju(sign.GetJustification()),
+	type(sign.GetType())
+{
+	SetPos(sign.GetRealPos());
+}
+
 void Sign::SetText(std::string newText)
 {
 	type = Normal;

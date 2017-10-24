@@ -19,6 +19,7 @@ private:
 
 public:
 	Sign(std::string text, int x, int y, Justification justification);
+	Sign(const Sign & sign);
 
 	void SetText(std::string newText);
 	std::string GetText() { return text; }

@@ -14,8 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef SAVE_H
-#define SAVE_H
+#ifndef SAVEOLD_H
+#define SAVEOLD_H
 #include <vector>
 #include "BSON.h"
 #include "json/json.h"

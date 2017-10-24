@@ -19,7 +19,7 @@
 #include "Simulation.h"
 #include "CoordStack.h"
 #include "gravity.h"
-#include "interface.h" //for framenum, try and remove this later
+#include "interface.h" //for framenum, try to remove this later
 #include "luaconsole.h" //for lua_el_mode
 #include "misc.h"
 #include "powder.h"
@@ -30,9 +30,12 @@
 #include "common/tpt-math.h"
 #include "common/tpt-minmax.h"
 #include "game/Brush.h"
+#include "game/Menus.h" // for active_menu setting on save load, try to remove this later
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "simulation/elements/MOVS.h"
 #include "simulation/elements/FIGH.h"
+#include "simulation/elements/PPIP.h"
 #include "simulation/elements/STKM.h"
 
 // Declare the element initialisation functions
@@ -123,6 +126,275 @@ void Simulation::RecountElements()
 	for (int i = 0; i < NPART; i++)
 		if (parts[i].type)
 			elementCount[parts[i].type]++;
+}
+
+bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool includePressure)
+{
+	if (!save)
+		return false;
+
+	// align to blockMap
+	int blockX = (loadX + CELL/2)/CELL;
+	int blockY = (loadY + CELL/2)/CELL;
+	loadX = blockX*CELL;
+	loadY = blockY*CELL;
+
+	if (replace >= 1)
+	{
+		clear_sim();
+		erase_bframe();
+		globalSim->instantActivation = false;
+	}
+
+	bool hasPalette = false;
+	int partMap[PT_NUM];
+	for(int i = 0; i < PT_NUM; i++)
+	{
+		partMap[i] = i;
+	}
+
+	if (save->palette.size())
+	{
+		for (std::vector<Save::PaletteItem>::iterator iter = save->palette.begin(), end = save->palette.end(); iter != end; ++iter)
+		{
+			Save::PaletteItem pi = *iter;
+			if (pi.second <= 0 || pi.second >= PT_NUM)
+				continue;
+			int myId = 0;
+			for (int i = 0; i < PT_NUM; i++)
+			{
+				if (elements[i].Enabled && elements[i].Identifier == pi.first)
+					myId = i;
+			}
+			// if this is a custom element, set the ID to the ID we found when comparing identifiers in the palette map
+			// set type to 0 if we couldn't find an element with that identifier present when loading,
+			//  unless this is a default element, in which case keep the current ID, because otherwise when an element is renamed it wouldn't show up anymore in older saves
+			if (myId != 0 || pi.first.find("DEFAULT_PT_") != 0)
+				partMap[pi.second] = myId;
+		}
+		hasPalette = true;
+	}
+
+	int i, r;
+	for (unsigned int n = 0; n < NPART && n < save->particlesCount; n++)
+	{
+		particle tempPart = save->particles[n];
+		tempPart.x += (float)loadX;
+		tempPart.y += (float)loadY;
+		int x = int(tempPart.x + 0.5f);
+		int y = int(tempPart.y + 0.5f);
+
+		if (tempPart.type >= 0 && tempPart.type < PT_NUM)
+		{
+			if (hasPalette)
+				tempPart.type = partMap[tempPart.type];
+			else
+				tempPart.type = save->FixType(tempPart.type);
+		}
+		else
+			continue;
+		int type = tempPart.type;
+
+		// ensure we can spawn this element
+		if ((type == PT_STKM || type == PT_STKM2 || type == PT_SPAWN || type == PT_SPAWN2) && elementCount[type] > 0)
+			continue;
+		if (type == PT_FIGH && !((FIGH_ElementDataContainer*)globalSim->elementData[PT_FIGH])->CanAlloc())
+			continue;
+		if (!elements[type].Enabled)
+			continue;
+
+		if (tempPart.ctype > 0 && tempPart.ctype < PT_NUM)
+			if (type == PT_CLNE || type == PT_PCLN || type == PT_BCLN || type == PT_PBCN || type == PT_STOR || type == PT_CONV
+			        || ((type == PT_STKM || type == PT_STKM2 || type == PT_FIGH) && tempPart.ctype != SPC_AIR) || type == PT_LAVA
+			        || type == PT_SPRK || type == PT_PSTN || type == PT_CRAY || type == PT_DTEC || type == PT_DRAY)
+			{
+				if (hasPalette)
+					tempPart.ctype = partMap[tempPart.ctype];
+				else
+					tempPart.ctype = save->FixType(tempPart.ctype);
+			}
+		if (type == PT_PIPE || type == PT_PPIP || type == PT_STOR)
+		{
+			if (hasPalette)
+				tempPart.tmp = partMap[tempPart.tmp&0xFF] | (tempPart.tmp&~0xFF);
+			else
+				tempPart.tmp = save->FixType((tempPart.tmp&0xFF) | (tempPart.tmp&~0xFF);)
+		}
+		if (type == PT_VIRS || type == PT_VRSG || type == PT_VRSS)
+		{
+			if (tempPart.tmp2 > 0 && tempPart.tmp2 < PT_NUM)
+			{
+				if (hasPalette)
+					tempPart.tmp2 = partMap[tempPart.tmp2];
+				else
+					tempPart.tmp2 = save->FixType(tempPart.tmp2);
+			}
+		}
+
+		//Replace existing
+		if ((r = pmap[y][x]))
+		{
+			elementCount[parts[r>>8].type]--;
+			parts[r>>8] = tempPart;
+			i = r>>8;
+			pmap[y][x] = 0;
+			elementCount[tempPart.type]++;
+		}
+		else if ((r = photons[y][x]))
+		{
+			elementCount[parts[r>>8].type]--;
+			parts[r>>8] = tempPart;
+			i = r>>8;
+			photons[y][x] = 0;
+			elementCount[tempPart.type]++;
+		}
+		//Allocate new particle
+		else
+		{
+			if (pfree == -1)
+				break;
+			i = pfree;
+			pfree = parts[i].life;
+			if (i > parts_lastActiveIndex)
+				parts_lastActiveIndex = i;
+			parts[i] = tempPart;
+
+			elementCount[tempPart.type]++;
+		}
+
+		if (parts[i].type == PT_STKM)
+		{
+			((STKM_ElementDataContainer*)elementData[PT_STKM])->NewStickman1(i, parts[i].ctype);
+		}
+		else if (parts[i].type == PT_STKM2)
+		{
+			((STKM_ElementDataContainer*)elementData[PT_STKM])->NewStickman2(i, parts[i].ctype);
+		}
+		else if (parts[i].type == PT_SPAWN)
+		{
+			((STKM_ElementDataContainer*)globalSim->elementData[PT_STKM])->GetStickman1()->spawnID = i;
+		}
+		else if (parts[i].type == PT_SPAWN2)
+		{
+			((STKM_ElementDataContainer*)globalSim->elementData[PT_STKM])->GetStickman2()->spawnID = i;
+		}
+		else if (parts[i].type == PT_FIGH)
+		{
+			parts[i].tmp = ((FIGH_ElementDataContainer*)elementData[PT_FIGH])->Alloc();
+			if (parts[i].tmp >= 0)
+				((FIGH_ElementDataContainer*)elementData[PT_FIGH])->NewFighter(this, parts[i].tmp, i, parts[i].ctype);
+			else
+				// should not be possible because we verify with CanAlloc above this
+				parts[i].type = PT_NONE;
+		}
+	}
+	parts_lastActiveIndex = NPART-1;
+	for (size_t i = 0; i < save->signs.size() && signs.size() < MAXSIGNS; i++)
+	{
+		if (save->signs[i].GetText().length())
+		{
+			Sign tempSign = save->signs[i];
+			tempSign.SetPos(tempSign.GetRealPos() + Point(fullX, fullY));
+			signs.push_back(new Sign(tempSign));
+		}
+	}
+	for (int saveBlockX = 0; saveBlockX < save->blockWidth; saveBlockX++)
+	{
+		for (int saveBlockY = 0; saveBlockY < save->blockHeight; saveBlockY++)
+		{
+			if (save->blockMap[saveBlockY][saveBlockX])
+			{
+				bmap[saveBlockY+blockY][saveBlockX+blockX] = save->blockMap[saveBlockY][saveBlockX];
+				air->fvx[saveBlockY+blockY][saveBlockX+blockX] = save->fanVelX[saveBlockY][saveBlockX];
+				air->fvy[saveBlockY+blockY][saveBlockX+blockX] = save->fanVelY[saveBlockY][saveBlockX];
+			}
+			if (includePressure)
+			{
+				air->pv[saveBlockY+blockY][saveBlockX+blockX] = save->pressure[saveBlockY][saveBlockX];
+				air->vx[saveBlockY+blockY][saveBlockX+blockX] = save->velocityX[saveBlockY][saveBlockX];
+				air->vy[saveBlockY+blockY][saveBlockX+blockX] = save->velocityY[saveBlockY][saveBlockX];
+				if (save->hasAmbientHeat)
+					air->hv[saveBlockY+blockY][saveBlockX+blockX] = save->ambientHeat[saveBlockY][saveBlockX];
+			}
+		}
+	}
+
+	// check for excessive stacking of particles next time update_particles is run
+	forceStackingCheck = 1;
+	((PPIP_ElementDataContainer*)elementData[PT_PPIP])->ppip_changed = 1;
+	gravity_mask();
+	air->RecalculateBlockAirMaps(this);
+
+	if (replace >= 1)
+	{
+		legacy_enable = save->legacyEnable;
+		aheat_enable = save->aheatEnable;
+		water_equal_test = save->waterEEnabled;
+		if (!sys_pause || replace == 2)
+			sys_pause = save->paused;
+		airMode = save->airMode;
+		if (save->msRotationPresent)
+			msRotation = save->msRotation;
+#ifndef NOMOD
+		if (save->modCreatedVersion)
+			instantActivation = true;
+#endif
+
+		// loading a tab, replace even more simulation / UI options
+		if (replace >= 2)
+		{
+#ifndef TOUCHUI
+			if (save->hudEnablePresent)
+				hud_enable = save->hudEnable;
+#endif
+			if (save->activeMenuPresent && save->activeMenu >= 0 && save->activeMenu < SC_TOTAL && menuSections[save->activeMenu]->enabled)
+				active_menu = save->activeMenu;
+			if (save->decorationsEnablePresent)
+				decorations_enable = save->decorationsEnable;
+
+			if (save->leftSelectedIdentifier.length())
+			{
+				Tool *temp = GetToolFromIdentifier(save->leftSelectedIdentifier);
+				if (temp)
+					activeTools[0] = temp;
+			}
+			if (save->rightSelectedIdentifier.length())
+			{
+				Tool *temp = GetToolFromIdentifier(save->rightSelectedIdentifier);
+				if (temp)
+					activeTools[1] = temp;
+			}
+		}
+
+#ifndef RENDERER
+		// Start / stop gravity thread
+		if (ngrav_enable != save->gravityEnable)
+		{
+			if (save->gravityEnable)
+				start_grav_async();
+			else
+				stop_grav_async();
+		}
+#endif
+		if (saveEdgeMode != save->edgeMode)
+		{
+			globalSim->saveEdgeMode = save->edgeMode;
+			if (globalSim->saveEdgeMode == 1)
+				draw_bframe();
+			else
+				erase_bframe();
+		}
+
+		LuaCode = mystrdup(save->luaCode.c_str());
+	}
+
+	for (std::vector<std::string>::iterator iter = save->logMessages.begin(), end = save->logMessages.end(); begin != end; ++iter)
+	{
+		char *log = mystrdup((*iter).c_str());
+		luacon_log(log);
+	}
+
+	return true;
 }
 
 // the function for creating a particle

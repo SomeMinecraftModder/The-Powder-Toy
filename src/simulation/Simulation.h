@@ -35,6 +35,7 @@
 
 class ElementDataContainer;
 class Brush;
+class Save;
 
 class Simulation
 {
@@ -80,6 +81,8 @@ public:
 	void UpdateAfter();
 	bool UpdateParticle(int i); // called by UpdateParticles
 	void Tick();
+	
+	bool LoadSave(int loadX, int loadY, Save *save, int replace, bool includePressure);
 
 	void spark_all(int i, int x, int y);
 	bool spark_all_attempt(int i, int x, int y);

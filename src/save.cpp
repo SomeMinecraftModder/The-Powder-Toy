@@ -204,11 +204,11 @@ int check_save(int save_as, int orig_x0, int orig_y0, int orig_w, int orig_h, in
 			{
 				if (give_warning)
 				{
-					char errortext[256] = "", elname[24] = "";
+					char errortext[256] = "", elname[40] = "";
 					if (parts[i].type > 0 && parts[i].type < PT_NUM)
 						sprintf(elname, "%s", ptypes[parts[i].type].name);
 					else
-						sprintf(elname, "invalid element number %i", parts[i].type);
+						sprintf(elname, "invalid element # %i", parts[i].type);
 					sprintf(errortext,"Found %s at X:%i Y:%i, cannot save",elname,(int)(parts[i].x+.5),(int)(parts[i].y+.5));
 					error_ui(vid_buf,0,errortext);
 				}
@@ -218,11 +218,11 @@ int check_save(int save_as, int orig_x0, int orig_y0, int orig_w, int orig_h, in
 			{
 				if (give_warning)
 				{
-					char errortext[256] = "", elname[24] = "";
+					char errortext[256] = "", elname[40] = "";
 					if (parts[i].ctype > 0 && parts[i].ctype < PT_NUM)
 						sprintf(elname, "%s", ptypes[parts[i].ctype].name);
 					else
-						sprintf(elname, "invalid elnumber %i", parts[i].ctype);
+						sprintf(elname, "invalid element # %i", parts[i].ctype);
 					sprintf(errortext,"Found %s at X:%i Y:%i, cannot save",elname,(int)(parts[i].x+.5),(int)(parts[i].y+.5));
 					error_ui(vid_buf,0,errortext);
 				}
