@@ -403,7 +403,6 @@ int Save::ParseSaveOPS(void *save, int size)
 							{
 								if (!strcmp(bson_iterator_key(&signiter), "text") && bson_iterator_type(&signiter) == BSON_STRING)
 								{
-									// CleanString is called in Simulation.cpp
 									theSign.SetText(Format::CleanString(bson_iterator_string(&signiter), true, true, true).substr(0, 45));
 								}
 								else if (!strcmp(bson_iterator_key(&signiter), "justification") && bson_iterator_type(&signiter) == BSON_INT)
@@ -612,6 +611,7 @@ int Save::ParseSaveOPS(void *save, int size)
 					renderModes.push_back(renderMode);
 				}
 			}
+			renderModesPresent = true;
 		}
 		else if (!strcmp(bson_iterator_key(&iter), "display_modes"))
 		{
@@ -625,10 +625,12 @@ int Save::ParseSaveOPS(void *save, int size)
 					displayModes.push_back(displayMode);
 				}
 			}
+			displayModesPresent = true;
 		}
 		else if (!strcmp(bson_iterator_key(&iter), "color_mode") && bson_iterator_type(&iter) == BSON_INT)
 		{
 			colorMode = bson_iterator_int(&iter);
+			colorModePresent = true;
 		}
 		else if (!strcmp(bson_iterator_key(&iter), "authors"))
 		{

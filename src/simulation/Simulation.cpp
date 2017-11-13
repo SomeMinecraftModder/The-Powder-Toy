@@ -365,20 +365,23 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 					activeTools[1] = temp;
 			}
 
-			// TODO: use SaveInfo for this globally too
-			svf_open = save->saveInfo.GetSaveOpened();
-			svf_filename = save->saveInfo.GetFileOpened();
-			strncpy(svf_name, save->saveInfo.GetSaveName(), 63);
-			strncpy(svf_filename, save->saveInfo.GetFileName(), 254);
-			svf_publish = save->saveInfo.GetPublished();
-			snprintf(svf_id, 15, save->saveInfo.GetSaveID());
-			strncpy(svf_description, save->saveInfo.GetDescription(), 254);
-			strncpy(svf_author, save->saveInfo.GetAuthor(), 63);
-			strncpy(svf_tags, save->saveInfo.GetTags(), 255);
-			svf_myvote = save->saveInfo.GetMyVote();
-			
-			svf_own = svf_login && !strcmp(svf_author, svf_user);
-			svf_publish = svf_publish && svf_own;
+			if (save->saveInfoPresent)
+			{
+				// TODO: use SaveInfo for this globally too
+				svf_open = save->saveInfo.GetSaveOpened();
+				svf_filename = save->saveInfo.GetFileOpened();
+				strncpy(svf_name, save->saveInfo.GetSaveName(), 63);
+				strncpy(svf_filename, save->saveInfo.GetFileName(), 254);
+				svf_publish = save->saveInfo.GetPublished();
+				snprintf(svf_id, 15, save->saveInfo.GetSaveID());
+				strncpy(svf_description, save->saveInfo.GetDescription(), 254);
+				strncpy(svf_author, save->saveInfo.GetAuthor(), 63);
+				strncpy(svf_tags, save->saveInfo.GetTags(), 255);
+				svf_myvote = save->saveInfo.GetMyVote();
+
+				svf_own = svf_login && !strcmp(svf_author, svf_user);
+				svf_publish = svf_publish && svf_own;
+			}
 			// TODO: svf_last should be a Save object
 			/*if (svf_last)
 				free(svf_last);
