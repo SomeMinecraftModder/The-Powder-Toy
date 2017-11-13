@@ -232,7 +232,7 @@ int check_save(int save_as, int orig_x0, int orig_y0, int orig_w, int orig_h, in
 			{
 				if (give_warning)
 				{
-					char errortext[256] = "", elname[24] = "";
+					char errortext[256] = "", elname[40] = "";
 					if ((parts[i].tmp&0xFF) > 0 && (parts[i].tmp&0xFF) < PT_NUM)
 						sprintf(elname, "%s", ptypes[parts[i].tmp&0xFF].name);
 					else

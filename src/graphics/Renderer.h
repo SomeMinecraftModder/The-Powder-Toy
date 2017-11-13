@@ -18,6 +18,8 @@
 #define CM_LIFE 10
 #define CM_COUNT 11
 
+class Save;
+
 struct RenderPreset
 {
 	std::set<unsigned int> renderModes;
@@ -69,6 +71,8 @@ public:
 	void SetColorMode(unsigned int color_mode);
 	void XORColorMode(unsigned int color_mode);
 	unsigned int GetColorMode();
+
+	void LoadSave(Save *save, int replace);
 };
 
 #endif // RENDERER_H

@@ -288,7 +288,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				parts[i].type = PT_NONE;
 		}
 	}
-	parts_lastActiveIndex = NPART-1;
+	//parts_lastActiveIndex = NPART-1;
 	for (size_t i = 0; i < save->signs.size() && signs.size() < MAXSIGNS; i++)
 	{
 		if (save->signs[i].GetText().length())
@@ -364,6 +364,26 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				if (temp)
 					activeTools[1] = temp;
 			}
+
+			// TODO: use SaveInfo for this globally too
+			svf_open = save->saveInfo.GetSaveOpened();
+			svf_filename = save->saveInfo.GetFileOpened();
+			strncpy(svf_name, save->saveInfo.GetSaveName(), 63);
+			strncpy(svf_filename, save->saveInfo.GetFileName(), 254);
+			svf_publish = save->saveInfo.GetPublished();
+			snprintf(svf_id, 15, save->saveInfo.GetSaveID());
+			strncpy(svf_description, save->saveInfo.GetDescription(), 254);
+			strncpy(svf_author, save->saveInfo.GetAuthor(), 63);
+			strncpy(svf_tags, save->saveInfo.GetTags(), 255);
+			svf_myvote = save->saveInfo.GetMyVote();
+			
+			svf_own = svf_login && !strcmp(svf_author, svf_user);
+			svf_publish = svf_publish && svf_own;
+			// TODO: svf_last should be a Save object
+			/*if (svf_last)
+				free(svf_last);
+			svf_last = save;
+			svf_lsize = size;*/
 		}
 
 #ifndef RENDERER
@@ -388,11 +408,22 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		LuaCode = mystrdup(save->luaCode.c_str());
 	}
 
+#ifdef LUACONSOLE
 	for (std::vector<std::string>::iterator iter = save->logMessages.begin(), end = save->logMessages.end(); begin != end; ++iter)
 	{
 		char *log = mystrdup((*iter).c_str());
 		luacon_log(log);
 	}
+	
+	if (!strcmp(svf_user, "jacob1") && replace == 1)
+	{
+		for (std::vector<std::string>::iterator iter = save->adminLogMessages.begin(), end = save->adminLogMessages.end(); begin != end; ++iter)
+		{
+			char *log = mystrdup((*iter).c_str());
+			luacon_log(log);
+		}
+	}
+#endif
 
 	return true;
 }

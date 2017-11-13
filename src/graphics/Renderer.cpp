@@ -2,6 +2,7 @@
 #include "graphics.h"
 #include "powdergraphics.h"
 #include "Renderer.h"
+#include "game/Save.h"
 
 Renderer::Renderer():
 	renderModes(std::set<unsigned int>()),
@@ -227,4 +228,29 @@ void Renderer::XORColorMode(unsigned int color_mode)
 unsigned int Renderer::GetColorMode()
 {
 	return colorMode;
+}
+
+// Called after Simulation::LoadSave. Used to load some renderer settings for specific saves
+void Renderer::LoadSave(Save *save, int replace)
+{
+	if (!save)
+		return;
+
+	render_mode = 0;
+	ClearRenderModes();
+	for (std::vector<unsigned int>::const_iterator iter = save->renderModes.begin(), end = save->renderModes.end(); iter != end; ++iter)
+	{
+		renderModes.insert(*iter);
+		Renderer::Ref().AddRenderMode(*iter);
+	}
+
+	display_mode = 0;
+	ClearDisplayModes();
+	for (std::vector<unsigned int>::const_iterator iter = save->displayModes.begin(), end = save->displayModes.end(); iter != end; ++iter)
+	{
+		displayModes.insert(*iter);
+		Renderer::Ref().AddDisplayMode(*iter);
+	}
+
+	colorMode = save->colorMode;
 }

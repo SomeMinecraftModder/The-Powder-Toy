@@ -56,7 +56,7 @@ Sign::Sign(std::string text, int x, int y, Justification justification):
 	SetText(text);
 }
 
-Sign::Sign(Sign & sign):
+Sign::Sign(const Sign & sign):
 	ju(sign.GetJustification()),
 	type(sign.GetType())
 {
@@ -116,7 +116,7 @@ void Sign::SetText(std::string newText)
 	}
 }
 
-std::string Sign::GetDisplayText(Simulation * sim)
+std::string Sign::GetDisplayText(Simulation * sim) const
 {
 	if (type == Normal && text.length() && text[0] == '{')
 	{
@@ -152,7 +152,7 @@ std::string Sign::GetDisplayText(Simulation * sim)
 	return displayText;
 }
 
-void Sign::GetPos(Simulation * sim, int & x0, int & y0, int & w, int & h)
+void Sign::GetPos(Simulation * sim, int & x0, int & y0, int & w, int & h) const
 {
 	w = VideoBuffer::TextSize(GetDisplayText(sim)).X + 4;
 	h = 14;

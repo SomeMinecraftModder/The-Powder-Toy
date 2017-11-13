@@ -11,6 +11,7 @@ class VideoBuffer
 	pixel* vid;
 	int width;
 	int height;
+
 public:
 	VideoBuffer(int width, int height);
 	~VideoBuffer();
@@ -31,7 +32,10 @@ public:
 
 	void DrawImage(pixel *image, int x, int y, int w, int h, int a=255);
 
-	pixel* GetVid() { return vid; }
+	pixel* GetVid() const { return vid; }
+	int GetWidth() const { return width; }
+	int GetHeight() const { return height; }
+	Point GetSize() const { return Point(width, height); }
 };
 
 #endif

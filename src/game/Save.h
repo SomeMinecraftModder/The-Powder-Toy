@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include "BSON.h"
+#include "game/SaveInfo.h"
 #include "game/Sign.h"
 #include "json/json.h"
 #include "simulation/ElementNumbers.h"
@@ -69,11 +70,16 @@ public:
 	std::string luaCode;
 	// log messages to show after loading save
 	std::vector<std::string> logMessages;
+	std::vector<std::string> adminLogMessages;
 	int createdVersion;
 	int modCreatedVersion;
 	int androidCreatedVersion;
 	std::string leftSelectedIdentifier;
 	std::string rightSelectedIdentifier;
+
+	// loaded save info
+	SaveInfo saveInfo;
+	bool saveInfoPresent;
 
 	// Simulation Options
 	bool legacyEnable;
@@ -98,6 +104,16 @@ public:
 	typedef std::pair<std::string, int> PaletteItem;
 	std::vector<PaletteItem> palette;
 
+	Json::Value authors;
+
+	// Even more jacob1's mod specific things
+	std::vector<unsigned int> renderModes;
+	bool renderModesPresent;
+	std::vector<unsigned int> displayModes;
+	bool displayModesPresent;
+	unsigned int colorMode;
+	bool colorModePresent;
+	
 	Save();
 
 	// converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up

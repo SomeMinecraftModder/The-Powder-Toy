@@ -22,17 +22,17 @@ public:
 	Sign(const Sign & sign);
 
 	void SetText(std::string newText);
-	std::string GetText() { return text; }
-	std::string GetLinkText() { return linkText; }
-	std::string GetDisplayText(Simulation * sim);
+	std::string GetText() const { return text; }
+	std::string GetLinkText() const { return linkText; }
+	std::string GetDisplayText(Simulation * sim) const;
 
 	void SetJustification(Justification newJustification) { ju = newJustification; }
-	Justification GetJustification() { return ju; }
+	Justification GetJustification() const { return ju; }
 	//void SetType(Type newType);
-	Type GetType() { return type; }
+	Type GetType() const { return type; }
 
-	Point GetRealPos() { return Point(x, y); }
-	void GetPos(Simulation * sim, int & x0, int & y0, int & w, int & h);
+	Point GetRealPos() const { return Point(x, y); }
+	void GetPos(Simulation * sim, int & x0, int & y0, int & w, int & h) const;
 	void SetPos(Point newPos) { x = newPos.X; y = newPos.Y; }
 	bool IsSignInArea(Point topLeft, Point bottomRight);
 };

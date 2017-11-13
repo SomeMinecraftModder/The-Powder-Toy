@@ -17,7 +17,11 @@
 #include <climits>
 #include "Save.h"
 #include "BSON.h"
+#include "hmap.h" // for firw_data
+#include "misc.h" // For restrict_flt
+#include "common/Format.h"
 #include "simulation/ElementNumbers.h"
+#include "simulation/SimulationData.h"
 #include "simulation/WallNumbers.h"
 
 Save::Save()
@@ -81,6 +85,15 @@ void Save::InitVars()
 	decorationsEnable = true;
 	decorationsEnablePresent = false;
 	//translated.x = translated.y = 0;
+
+	saveInfoPresent = false;
+
+	renderModes = std::vector<unsigned int>();
+	renderModesPresent = false;
+	displayModes = std::vector<unsigned int>();
+	displayModesPresent = false;
+	colorMode = 0;
+	colorModePresent = false;
 }
 
 int Save::FixType(int type)
@@ -279,7 +292,6 @@ int Save::ParseSaveOPS(void *save, int size)
 	unsigned int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
 	createdVersion = inputData[4];
 	int elementPalette[PT_NUM];
-	bool hasPallete = false;
 	bson b;
 	bson_iterator iter;
 
@@ -340,8 +352,6 @@ int Save::ParseSaveOPS(void *save, int size)
 
 	bson_init_data_size(&b, (char*)bsonData, bsonDataLen);
 	bson_iterator_init(&iter, &b);
-	bool tempGravityEnable = false;
-	int tempEdgeMode = 0;
 	while (bson_iterator_next(&iter))
 	{
 		CheckBsonFieldUser(iter, "parts", &partsData, &partsDataLen);
@@ -393,7 +403,8 @@ int Save::ParseSaveOPS(void *save, int size)
 							{
 								if (!strcmp(bson_iterator_key(&signiter), "text") && bson_iterator_type(&signiter) == BSON_STRING)
 								{
-									theSign.SetText(CleanString(bson_iterator_string(&signiter), true, true, true).substr(0, 45));
+									// CleanString is called in Simulation.cpp
+									theSign.SetText(Format::CleanString(bson_iterator_string(&signiter), true, true, true).substr(0, 45));
 								}
 								else if (!strcmp(bson_iterator_key(&signiter), "justification") && bson_iterator_type(&signiter) == BSON_INT)
 								{
@@ -551,115 +562,84 @@ int Save::ParseSaveOPS(void *save, int size)
 				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
 			}
 		}
-		else if (!strcmp(bson_iterator_key(&iter), "saveInfo") && replace == 2)
+		else if (!strcmp(bson_iterator_key(&iter), "saveInfo"))
 		{
-			if(bson_iterator_type(&iter)==BSON_OBJECT)
+			if (bson_iterator_type(&iter) == BSON_OBJECT)
 			{
 				bson_iterator saveInfoiter;
 				bson_iterator_subiterator(&iter, &saveInfoiter);
-				while(bson_iterator_next(&saveInfoiter))
+				while (bson_iterator_next(&saveInfoiter))
 				{
-					if(!strcmp(bson_iterator_key(&saveInfoiter), "saveOpened") && bson_iterator_type(&saveInfoiter) == BSON_INT)
-						svf_open = bson_iterator_int(&saveInfoiter);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "fileOpened") && bson_iterator_type(&saveInfoiter) == BSON_INT)
-						svf_fileopen = bson_iterator_int(&saveInfoiter);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "saveName") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_name, bson_iterator_string(&saveInfoiter), 63);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "fileName") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_filename, bson_iterator_string(&saveInfoiter), 254);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "published") && bson_iterator_type(&saveInfoiter) == BSON_INT)
-						svf_publish = bson_iterator_int(&saveInfoiter);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "ID") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_id, bson_iterator_string(&saveInfoiter), 15);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "description") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_description, bson_iterator_string(&saveInfoiter), 254);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "author") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_author, bson_iterator_string(&saveInfoiter), 63);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "tags") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
-						strncpy(svf_tags, bson_iterator_string(&saveInfoiter), 255);
-					else if(!strcmp(bson_iterator_key(&saveInfoiter), "myVote") && bson_iterator_type(&saveInfoiter) == BSON_INT)
-						svf_myvote = bson_iterator_int(&saveInfoiter);
+					if (!strcmp(bson_iterator_key(&saveInfoiter), "saveOpened") && bson_iterator_type(&saveInfoiter) == BSON_INT)
+						saveInfo.SetSaveOpened(bson_iterator_bool(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "fileOpened") && bson_iterator_type(&saveInfoiter) == BSON_INT)
+						saveInfo.SetFileOpened(bson_iterator_bool(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "saveName") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetSaveName(bson_iterator_string(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "fileName") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetFileName(bson_iterator_string(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "published") && bson_iterator_type(&saveInfoiter) == BSON_INT)
+						saveInfo.SetPublished(bson_iterator_bool(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "ID") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetSaveID(Format::StringToNumber<int>(bson_iterator_string(&saveInfoiter)));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "description") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetDescription(bson_iterator_string(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "author") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetAuthor(bson_iterator_string(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "tags") && bson_iterator_type(&saveInfoiter) == BSON_STRING)
+						saveInfo.SetTags(bson_iterator_string(&saveInfoiter));
+					else if (!strcmp(bson_iterator_key(&saveInfoiter), "myVote") && bson_iterator_type(&saveInfoiter) == BSON_INT)
+						saveInfo.SetMyVote(bson_iterator_int(&saveInfoiter));
 					else
 						fprintf(stderr, "Unknown save info property %s\n", bson_iterator_key(&saveInfoiter));
 				}
-				svf_own = svf_login && !strcmp(svf_author, svf_user);
-				svf_publish = svf_publish && svf_login && !strcmp(svf_author, svf_user);
-				if (svf_last)
-					free(svf_last);
-				svf_last = save;
-				svf_lsize = size;
+				saveInfoPresent = true;
 			}
 			else
 			{
 				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
 			}
 		}
-		else if (!strcmp(bson_iterator_key(&iter), "render_modes") && replace == 2)
+		else if (!strcmp(bson_iterator_key(&iter), "render_modes"))
 		{
 			bson_iterator subiter;
 			bson_iterator_subiterator(&iter, &subiter);
-			render_mode = 0;
-			Renderer::Ref().ClearRenderModes();
 			while (bson_iterator_next(&subiter))
 			{
 				if (bson_iterator_type(&subiter) == BSON_INT)
 				{
 					unsigned int renderMode = bson_iterator_int(&subiter);
-					Renderer::Ref().AddRenderMode(renderMode);
+					renderModes.push_back(renderMode);
 				}
 			}
 		}
-		else if (!strcmp(bson_iterator_key(&iter), "display_modes") && replace == 2)
+		else if (!strcmp(bson_iterator_key(&iter), "display_modes"))
 		{
 			bson_iterator subiter;
 			bson_iterator_subiterator(&iter, &subiter);
-			display_mode = 0;
-			Renderer::Ref().ClearDisplayModes();
 			while (bson_iterator_next(&subiter))
 			{
 				if (bson_iterator_type(&subiter) == BSON_INT)
 				{
 					unsigned int displayMode = bson_iterator_int(&subiter);
-					Renderer::Ref().AddDisplayMode(displayMode);
+					displayModes.push_back(displayMode);
 				}
 			}
 		}
-		else if (!strcmp(bson_iterator_key(&iter), "color_mode") && replace == 2 && bson_iterator_type(&iter) == BSON_INT)
+		else if (!strcmp(bson_iterator_key(&iter), "color_mode") && bson_iterator_type(&iter) == BSON_INT)
 		{
-			Renderer::Ref().SetColorMode(bson_iterator_int(&iter));
+			colorMode = bson_iterator_int(&iter);
 		}
 		else if (!strcmp(bson_iterator_key(&iter), "authors"))
 		{
 			if (bson_iterator_type(&iter) == BSON_OBJECT)
 			{
-				ConvertBsonToJson(&iter, j);
+				ConvertBsonToJson(&iter, &authors);
 			}
 			else
 			{
 				fprintf(stderr, "Wrong type for %s\n", bson_iterator_key(&iter));
 			}
-		}
-	}
-
-	if (replace > 0)
-	{
-#ifndef RENDERER
-		//Change the gravity state
-		if (ngrav_enable != tempGravityEnable)
-		{
-			if (tempGravityEnable)
-				start_grav_async();
-			else
-				stop_grav_async();
-		}
-#endif
-		if (globalSim->saveEdgeMode != tempEdgeMode)
-		{
-			globalSim->saveEdgeMode = tempEdgeMode;
-			if (globalSim->saveEdgeMode == 1)
-				draw_bframe();
-			else
-				erase_bframe();
 		}
 	}
 
@@ -679,7 +659,7 @@ int Save::ParseSaveOPS(void *save, int size)
 			{
 				if (wallData[y*blockW+x])
 				{
-					int wt = change_wallpp(wallData[y*blockW+x]);
+					int wt = ChangeWallpp(wallData[y*blockW+x]);
 					if (wt < 0 || wt >= WALLCOUNT)
 						continue;
 					blockMap[blockY+y][blockX+x] = wt;
@@ -695,11 +675,10 @@ int Save::ParseSaveOPS(void *save, int size)
 				}
 			}
 		}
-		gravity_mask();
 	}
 	
 	//Read pressure data
-	if (pressData && includePressure)
+	if (pressData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
@@ -720,7 +699,7 @@ int Save::ParseSaveOPS(void *save, int size)
 	}
 
 	//Read vx data
-	if (vxData && includePressure)
+	if (vxData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
@@ -741,7 +720,7 @@ int Save::ParseSaveOPS(void *save, int size)
 	}
 
 	//Read vy data
-	if (vyData && includePressure)
+	if (vyData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
@@ -762,7 +741,7 @@ int Save::ParseSaveOPS(void *save, int size)
 	}
 
 	// Read ambient heat data
-	if (ambientData && aheat_enable && includePressure)
+	if (ambientData && aheat_enable)
 	{
 		unsigned int tempTemp, j = 0;
 		if (blockW * blockH > ambientDataLen)
@@ -791,7 +770,6 @@ int Save::ParseSaveOPS(void *save, int size)
 			fprintf(stderr, "Not enough particle position data\n");
 			goto fail;
 		}
-		globalSim->parts_lastActiveIndex = NPART-1;
 		freeIndicesCount = 0;
 		freeIndices = (unsigned int*)calloc(sizeof(unsigned int), NPART);
 		partsSimIndex = (unsigned*)calloc(NPART, sizeof(unsigned));
@@ -842,8 +820,6 @@ int Save::ParseSaveOPS(void *save, int size)
 					particles[newIndex].x = (float)x;
 					particles[newIndex].y = (float)y;
 					i+=3;
-					
-					particles[newIndex].type = fix_type(particles[newIndex].type, saved_version, modsave, hasPallete ? elementPalette : NULL);
 
 					//Read temp
 					if (fieldDescriptor & 0x01)
@@ -891,8 +867,6 @@ int Save::ParseSaveOPS(void *save, int size)
 								particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 16);
 							}
 						}
-						if (particles[newIndex].type == PT_PIPE || particles[newIndex].type == PT_PPIP || particles[newIndex].type == PT_STOR)
-							particles[newIndex].tmp = fix_type(particles[newIndex].tmp&0xFF, saved_version, modsave, hasPallete ? elementPalette : NULL)|(parts[newIndex].tmp&~0xFF);
 					}
 					
 					//Read ctype
@@ -908,8 +882,6 @@ int Save::ParseSaveOPS(void *save, int size)
 							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 16);
 							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 8);
 						}
-						if (particles[newIndex].type == PT_CLNE || particles[newIndex].type == PT_PCLN || particles[newIndex].type == PT_BCLN || particles[newIndex].type == PT_PBCN || particles[newIndex].type == PT_STOR || particles[newIndex].type == PT_CONV || ((particles[newIndex].type == PT_STKM || particles[newIndex].type == PT_STKM2 || particles[newIndex].type == PT_FIGH) && particles[newIndex].ctype != SPC_AIR) || particles[newIndex].type == PT_LAVA || particles[newIndex].type == PT_SPRK || particles[newIndex].type == PT_PSTN || particles[newIndex].type == PT_CRAY || particles[newIndex].type == PT_DTEC || particles[newIndex].type == PT_DRAY)
-							particles[newIndex].ctype = fix_type(particles[newIndex].ctype, saved_version, modsave, hasPallete ? elementPalette : NULL);
 					}
 					
 					//Read dcolour
@@ -948,8 +920,6 @@ int Save::ParseSaveOPS(void *save, int size)
 							if(i >= partsDataLen) goto fail;
 							particles[newIndex].tmp2 |= (((unsigned)partsData[i++]) << 8);
 						}
-						if (particles[newIndex].type == PT_VIRS || particles[newIndex].type == PT_VRSS || particles[newIndex].type == PT_VRSG)
-							particles[newIndex].tmp2 = fix_type(particles[newIndex].tmp2, saved_version, modsave, hasPallete ? elementPalette : NULL);
 					}
 
 					//Read pavg (for moving solids)
@@ -975,14 +945,10 @@ int Save::ParseSaveOPS(void *save, int size)
 						}
 					}
 
-					// don't do any of the below stuff when shifting stamps (transform_save)
-					if (replace < 0)
-						continue;
 					// no more particle properties to load, so we can change type here without messing up loading
 					if (particles[newIndex].type == PT_SOAP)
-						particles[newIndex].ctype &= ~6; // delete all soap connections, but it looks like if tmp & tmp2 were saved to 3 bytes, connections would load properly
-					if (!ptypes[particles[newIndex].type].enabled && !secret_els)
-						particles[newIndex].type = PT_NONE;
+						// delete all soap connections, but it looks like if tmp & tmp2 were saved to 3 bytes, connections would load properly
+						particles[newIndex].ctype &= ~6;
 
 					if (createdVersion < 81)
 					{
@@ -1176,25 +1142,11 @@ int Save::ParseSaveOPS(void *save, int size)
 		}
 	}
 
-#ifdef LUACONSOLE
-	//TODO: don't use lua logging
-	if (!strcmp(svf_user, "jacob1") && replace == 1)
-	{
-		if (androidCreatedVersion)
-		{
-			char* modver = (char*)calloc(35, sizeof(char));
-			sprintf(modver, "Made in android build version %d", androidCreatedVersion);
-			luacon_log(modver);
-		}
+	if (androidCreatedVersion)
+		adminLogMessages.push_back("Made in android build version " + androidCreatedVersion);
 
-		if (modCreatedVersion && !androidCreatedVersion)
-		{
-			char* modver = (char*)calloc(33, sizeof(char));
-			sprintf(modver, "Made in jacob1's mod version %d", modCreatedVersion);
-			luacon_log(modver);
-		}
-	}
-#endif
+	if (modCreatedVersion && !androidCreatedVersion)
+		adminLogMessages.push_back("Made in jacob1's mod version " + modCreatedVersion);
 
 	goto fin;
 fail:
