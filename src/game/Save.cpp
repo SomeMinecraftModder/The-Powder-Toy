@@ -67,6 +67,9 @@ void Save::SetSize(int newWidth, int newHeight)
 
 void Save::InitVars()
 {
+	modCreatedVersion = 0;
+	androidCreatedVersion = 0;
+
 	waterEEnabled = false;
 	legacyEnable = false;
 	gravityEnable = false;
@@ -227,6 +230,11 @@ int Save::ChangeWallpp(int wt)
 	return wt;
 }
 
+int Save::ParseSave(void *save, int size)
+{
+	return ParseSaveOPS(save, size);
+}
+
 void Save::CheckBsonFieldUser(bson_iterator iter, const char *field, unsigned char **data, unsigned int *fieldLen)
 {
 	if (!strcmp(bson_iterator_key(&iter), field))
@@ -286,17 +294,14 @@ int Save::ParseSaveOPS(void *save, int size)
 	unsigned char *movsData = NULL, *animData = NULL;
 	unsigned int movsDataLen, animDataLen;
 #endif
-	unsigned partsCount = 0, *partsSimIndex = NULL;
+	unsigned *partsSimIndex = NULL;
 	unsigned int freeIndicesCount, returnCode = 0;
 	unsigned int *freeIndices = NULL;
 	unsigned int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
 	createdVersion = inputData[4];
-	int elementPalette[PT_NUM];
 	bson b;
 	bson_iterator iter;
 
-	for (int i = 0; i < PT_NUM; i++)
-		elementPalette[i] = i;
 	//Block sizes
 	blockX = 0;
 	blockY = 0;
@@ -775,7 +780,6 @@ int Save::ParseSaveOPS(void *save, int size)
 		freeIndicesCount = 0;
 		freeIndices = (unsigned int*)calloc(sizeof(unsigned int), NPART);
 		partsSimIndex = (unsigned*)calloc(NPART, sizeof(unsigned));
-		partsCount = 0;
 		for (unsigned int i = 0; i < NPART; i++)
 		{
 			// keep a track of indices we can use
@@ -812,7 +816,7 @@ int Save::ParseSaveOPS(void *save, int size)
 						goto fail;
 
 					//Store particles index+1 for this saved particle index (0 means not loaded)
-					partsSimIndex[partsCount++] = newIndex + 1;
+					partsSimIndex[particlesCount++] = newIndex + 1;
 
 					//Clear the particle, ready for our new properties
 					memset(&(particles[newIndex]), 0, sizeof(particle));
@@ -1029,88 +1033,42 @@ int Save::ParseSaveOPS(void *save, int size)
 			}
 		}
 #ifndef NOMOD
-		if (movsData && replace >= 0)
+		if (movsData)
 		{
-			int movsDataPos = 0, numBalls = ((MOVS_ElementDataContainer*)globalSim->elementData[PT_MOVS])->GetNumBalls();
-			int solids[MAX_MOVING_SOLIDS]; //solids is a map of the old .tmp2 it was saved with, to the new ball number it is getting
-			memset(solids, MAX_MOVING_SOLIDS, sizeof(solids)); //default to invalid ball
-			for (unsigned int  i = 0; i < movsDataLen/2; i++)
+			int movsDataPos = 0;
+			for (unsigned int i = 0; i < movsDataLen/2; i++)
 			{
-				int bn = movsData[movsDataPos++];
-				if (bn >= 0 && bn < MAX_MOVING_SOLIDS)
-				{
-					solids[bn] = numBalls;
-					MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)globalSim->elementData[PT_MOVS])->GetMovingSolid(numBalls++);
-					if (movingSolid) //create a moving solid and clear all it's variables
-					{
-						movingSolid->Simulation_Cleared();
-						movingSolid->rotationOld = movingSolid->rotation = movsData[movsDataPos++]/20.0f - 2*M_PI; //set its rotation
-					}
-				}
-				else
-					movsDataPos++;
-			}
-			((MOVS_ElementDataContainer*)globalSim->elementData[PT_MOVS])->SetNumBalls(numBalls); //new number of known moving solids
-			for (unsigned int i = 0; i < partsCount; i++)
-			{
-				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_MOVS)
-				{
-					int newIndex = partsSimIndex[i]-1;
-					if (!(particles[newIndex].flags&FLAG_DISAPPEAR) && particles[newIndex].tmp2 >= 0 && particles[newIndex].tmp2 < MAX_MOVING_SOLIDS)
-					{
-						particles[newIndex].tmp2 = solids[particles[newIndex].tmp2];
-						MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)globalSim->elementData[PT_MOVS])->GetMovingSolid(particles[newIndex].tmp2);
-						if (movingSolid)
-						{
-							movingSolid->particleCount++; //increase ball particle count
-							//set center "controlling" particle
-							if (particles[newIndex].pavg[0] == 0 && particles[newIndex].pavg[1] == 0)
-								movingSolid->index = newIndex+1;
-						}
-					}
-					else
-						particles[newIndex].tmp2 = MAX_MOVING_SOLIDS; //default to invalid ball
-
-					if (particles[newIndex].pavg[0] > 32768)
-						particles[newIndex].pavg[0] -= 65536;
-					if (particles[newIndex].pavg[1] > 32768)
-						particles[newIndex].pavg[1] -= 65536;
-				}
+				MOVSdataItem data = std::pair<int, int>(movsData[movsDataPos], movsData[movsDataPos+1]);
+				MOVSdata.push_back(data);
+				movsDataPos += 2;
 			}
 		}
-		if (animData && replace >= 0)
+		if (animData)
 		{
 			unsigned int animDataPos = 0;
-			for (unsigned i = 0; i < partsCount; i++)
+			for (unsigned i = 0; i < particlesCount; i++)
 			{
 				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_ANIM)
 				{
-					if (animDataPos >= animDataLen) break;
+					if (animDataPos >= animDataLen)
+						break;
 
+					ANIMdataItem data;
 					newIndex = partsSimIndex[i]-1;
-					int origanimLen = animData[animDataPos++];
-					int animLen = std::min(origanimLen, globalSim->maxFrames-1); //read animation length, make sure it doesn't go past the current frame limit
-					particles[newIndex].ctype = animLen;
-					particles[newIndex].animations = (ARGBColour*)calloc(globalSim->maxFrames, sizeof(ARGBColour));
-					if (animDataPos+4*animLen > animDataLen || particles[newIndex].animations == NULL)
+					int animLen = animData[animDataPos++];
+					data.first = animLen;
+					if (animDataPos+4*animLen > animDataLen)
 						goto fail;
 
-					for (int j = 0; j < globalSim->maxFrames; j++)
+					for (int j = 0; j < animLen; j++)
 					{
-						if (j <= animLen) //read animation data
-						{
-							unsigned char alpha = animData[animDataPos++];
-							unsigned char red = animData[animDataPos++];
-							unsigned char green = animData[animDataPos++];
-							unsigned char blue = animData[animDataPos++];
-							particles[newIndex].animations[j] = COLARGB(alpha, red, green, blue);
-						}
-						else //set the rest to 0
-							particles[newIndex].animations[j] = 0;
+						unsigned char alpha = animData[animDataPos++];
+						unsigned char red = animData[animDataPos++];
+						unsigned char green = animData[animDataPos++];
+						unsigned char blue = animData[animDataPos++];
+						data.second.push_back(COLARGB(alpha, red, green, blue));
 					}
-					//ignore any extra data in case user set maxFrames to something small
-					if (origanimLen+1 > globalSim->maxFrames)
-						animDataPos += 4*(origanimLen+1-globalSim->maxFrames);
+					ANIMdata.push_back(data);
 				}
 			}
 		}
@@ -1118,7 +1076,7 @@ int Save::ParseSaveOPS(void *save, int size)
 		if (soapLinkData)
 		{
 			unsigned int soapLinkDataPos = 0;
-			for (unsigned int i = 0; i < partsCount; i++)
+			for (unsigned int i = 0; i < particlesCount; i++)
 			{
 				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_SOAP)
 				{
@@ -1129,7 +1087,7 @@ int Save::ParseSaveOPS(void *save, int size)
 					linkedIndex |= soapLinkData[soapLinkDataPos++]<<8;
 					linkedIndex |= soapLinkData[soapLinkDataPos++];
 					// All indexes in soapLinkData and partsSimIndex have 1 added to them (0 means not saved/loaded)
-					if (!linkedIndex || linkedIndex-1>=partsCount || !partsSimIndex[linkedIndex-1])
+					if (!linkedIndex || linkedIndex-1>=particlesCount || !partsSimIndex[linkedIndex-1])
 						continue;
 					linkedIndex = partsSimIndex[linkedIndex-1]-1;
 					newIndex = partsSimIndex[i]-1;
@@ -1188,7 +1146,7 @@ void Save::Deallocate2DArray(T ***array, int blockHeight)
 	}
 }
 
-void ConvertBsonToJson(bson_iterator *iter, Json::Value *j, int depth)
+void Save::ConvertBsonToJson(bson_iterator *iter, Json::Value *j, int depth)
 {
 	bson_iterator subiter;
 	bson_iterator_subiterator(iter, &subiter);
@@ -1229,7 +1187,7 @@ void ConvertBsonToJson(bson_iterator *iter, Json::Value *j, int depth)
 	}
 }
 
-std::set<int> GetNestedSaveIDs(Json::Value j)
+std::set<int> Save::GetNestedSaveIDs(Json::Value j)
 {
 	Json::Value::Members members = j.getMemberNames();
 	std::set<int> saveIDs = std::set<int>();
@@ -1259,7 +1217,7 @@ std::set<int> GetNestedSaveIDs(Json::Value j)
 }
 
 // converts a json object to bson
-void ConvertJsonToBson(bson *b, Json::Value j, int depth)
+void Save::ConvertJsonToBson(bson *b, Json::Value j, int depth)
 {
 	Json::Value::Members members = j.getMemberNames();
 	for (Json::Value::Members::iterator iter = members.begin(), end = members.end(); iter != end; ++iter)

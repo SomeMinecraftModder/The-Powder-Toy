@@ -30,7 +30,7 @@ bool Simulation::TransferHeat(int i, int t, int surround[8])
 	}
 
 	//heat transfer code
-	if ((t!=PT_HSWC || parts[i].life==10) && (elements[t].HeatConduct*gel_scale) && (realistic || (elements[t].HeatConduct*gel_scale) > (rand()%250)))
+	if ((t!=PT_HSWC || parts[i].life==10) && elements[t].HeatConduct*gel_scale != 0 && (realistic || (elements[t].HeatConduct*gel_scale) > (rand()%250)))
 	{
 		float c_Cm = 0.0f;
 		if (aheat_enable && !(elements[t].Properties&PROP_NOAMBHEAT))

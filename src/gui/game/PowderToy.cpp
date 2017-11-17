@@ -20,6 +20,7 @@
 #include "game/Brush.h"
 #include "game/Download.h"
 #include "game/Menus.h"
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "game/ToolTip.h"
 #include "graphics/Renderer.h"
@@ -1792,9 +1793,15 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 		stampMoving = false;
 #endif
 		Snapshot::TakeSnapshot(sim);
-		Json::Value tempStampInfo;
-		if (!parse_save(stampData, stampSize, 0, loadPos.X, loadPos.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, pmap, &tempStampInfo, !shiftHeld))
-			MergeStampAuthorInfo(tempStampInfo);
+		//Json::Value tempStampInfo;
+		//if (!parse_save(stampData, stampSize, 0, loadPos.X, loadPos.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, pmap, &tempStampInfo, !shiftHeld))
+		//	MergeStampAuthorInfo(tempStampInfo);
+		
+		Save *save = new Save();
+		save->ParseSave(stampData, stampSize);
+		sim->LoadSave(loadPos.X, loadPos.Y, save, 0, !shiftHeld);
+		//MergeStampAuthorInfo(save->authors);
+		
 		ResetStampState();
 		return;
 	}

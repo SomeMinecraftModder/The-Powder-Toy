@@ -143,7 +143,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 	{
 		clear_sim();
 		erase_bframe();
-		globalSim->instantActivation = false;
+		instantActivation = false;
 	}
 
 	bool hasPalette = false;
@@ -198,7 +198,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		// ensure we can spawn this element
 		if ((type == PT_STKM || type == PT_STKM2 || type == PT_SPAWN || type == PT_SPAWN2) && elementCount[type] > 0)
 			continue;
-		if (type == PT_FIGH && !((FIGH_ElementDataContainer*)globalSim->elementData[PT_FIGH])->CanAlloc())
+		if (type == PT_FIGH && !((FIGH_ElementDataContainer*)elementData[PT_FIGH])->CanAlloc())
 			continue;
 		if (!elements[type].Enabled)
 			continue;
@@ -218,7 +218,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			if (hasPalette)
 				tempPart.tmp = partMap[tempPart.tmp&0xFF] | (tempPart.tmp&~0xFF);
 			else
-				tempPart.tmp = save->FixType((tempPart.tmp&0xFF) | (tempPart.tmp&~0xFF);)
+				tempPart.tmp = save->FixType((tempPart.tmp&0xFF) | (tempPart.tmp&~0xFF));
 		}
 		if (type == PT_VIRS || type == PT_VRSG || type == PT_VRSS)
 		{
@@ -272,11 +272,11 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		}
 		else if (parts[i].type == PT_SPAWN)
 		{
-			((STKM_ElementDataContainer*)globalSim->elementData[PT_STKM])->GetStickman1()->spawnID = i;
+			((STKM_ElementDataContainer*)elementData[PT_STKM])->GetStickman1()->spawnID = i;
 		}
 		else if (parts[i].type == PT_SPAWN2)
 		{
-			((STKM_ElementDataContainer*)globalSim->elementData[PT_STKM])->GetStickman2()->spawnID = i;
+			((STKM_ElementDataContainer*)elementData[PT_STKM])->GetStickman2()->spawnID = i;
 		}
 		else if (parts[i].type == PT_FIGH)
 		{
@@ -294,13 +294,13 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		if (save->signs[i].GetText().length())
 		{
 			Sign tempSign = save->signs[i];
-			tempSign.SetPos(tempSign.GetRealPos() + Point(fullX, fullY));
+			tempSign.SetPos(tempSign.GetRealPos() + Point(loadX, loadY));
 			signs.push_back(new Sign(tempSign));
 		}
 	}
-	for (int saveBlockX = 0; saveBlockX < save->blockWidth; saveBlockX++)
+	for (unsigned int saveBlockX = 0; saveBlockX < save->blockWidth; saveBlockX++)
 	{
-		for (int saveBlockY = 0; saveBlockY < save->blockHeight; saveBlockY++)
+		for (unsigned int saveBlockY = 0; saveBlockY < save->blockHeight; saveBlockY++)
 		{
 			if (save->blockMap[saveBlockY][saveBlockX])
 			{
@@ -369,14 +369,14 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			{
 				// TODO: use SaveInfo for this globally too
 				svf_open = save->saveInfo.GetSaveOpened();
-				svf_filename = save->saveInfo.GetFileOpened();
-				strncpy(svf_name, save->saveInfo.GetSaveName(), 63);
-				strncpy(svf_filename, save->saveInfo.GetFileName(), 254);
+				svf_fileopen = save->saveInfo.GetFileOpened();
+				strncpy(svf_name, save->saveInfo.GetSaveName().c_str(), 63);
+				strncpy(svf_filename, save->saveInfo.GetFileName().c_str(), 254);
 				svf_publish = save->saveInfo.GetPublished();
-				snprintf(svf_id, 15, save->saveInfo.GetSaveID());
-				strncpy(svf_description, save->saveInfo.GetDescription(), 254);
-				strncpy(svf_author, save->saveInfo.GetAuthor(), 63);
-				strncpy(svf_tags, save->saveInfo.GetTags(), 255);
+				snprintf(svf_id, 15, "%i", save->saveInfo.GetSaveID());
+				strncpy(svf_description, save->saveInfo.GetDescription().c_str(), 254);
+				strncpy(svf_author, save->saveInfo.GetAuthor().c_str(), 63);
+				strncpy(svf_tags, save->saveInfo.GetTags().c_str(), 255);
 				svf_myvote = save->saveInfo.GetMyVote();
 
 				svf_own = svf_login && !strcmp(svf_author, svf_user);
@@ -401,8 +401,8 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 #endif
 		if (saveEdgeMode != save->edgeMode)
 		{
-			globalSim->saveEdgeMode = save->edgeMode;
-			if (globalSim->saveEdgeMode == 1)
+			saveEdgeMode = save->edgeMode;
+			if (saveEdgeMode == 1)
 				draw_bframe();
 			else
 				erase_bframe();
@@ -411,8 +411,95 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		LuaCode = mystrdup(save->luaCode.c_str());
 	}
 
+#ifndef NOMOD
+	if (save->MOVSdata.size())
+	{
+		int movsDataPos = 0, numBalls = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetNumBalls();
+		// Solids is a map of the old .tmp2 it was saved with, to the new ball number it is getting
+		int solids[MAX_MOVING_SOLIDS];
+		// Default to invalid ball
+		std::fill(&solids[0], &solids[MAX_MOVING_SOLIDS], MAX_MOVING_SOLIDS);
+		for (std::vector<Save::MOVSdataItem>::iterator iter = save->MOVSdata.begin(), end = save->MOVSdata.end(); iter != end; ++iter)
+		{
+			Save::MOVSdataItem data = *iter;
+			int bn = data.first;
+			if (bn >= 0 && bn < MAX_MOVING_SOLIDS)
+			{
+				solids[bn] = numBalls;
+				MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(numBalls++);
+				// Create a moving solid and clear all its variables
+				if (movingSolid)
+				{
+					movingSolid->Simulation_Cleared();
+					// Set its rotation
+					movingSolid->rotationOld = movingSolid->rotation = data.second/20.0f - 2*M_PI;
+				}
+			}
+			else
+				movsDataPos++;
+		}
+		// New number of known moving solids
+		((MOVS_ElementDataContainer*)elementData[PT_MOVS])->SetNumBalls(numBalls);
+		for (unsigned int i = 0; i < save->particlesCount; i++)
+		{
+			if (save->particles[i].type == PT_MOVS)
+			{
+				if (!(save->particles[i].flags&FLAG_DISAPPEAR) && save->particles[i].tmp2 >= 0 && save->particles[i].tmp2 < MAX_MOVING_SOLIDS)
+				{
+					save->particles[i].tmp2 = solids[save->particles[i].tmp2];
+					MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(save->particles[i].tmp2);
+					if (movingSolid)
+					{
+						// Increase ball particle count
+						movingSolid->particleCount++;
+						// Set center "controlling" particle
+						if (save->particles[i].pavg[0] == 0 && save->particles[i].pavg[1] == 0)
+							movingSolid->index = i+1;
+					}
+				}
+				else
+					// Default to invalid ball
+					save->particles[i].tmp2 = MAX_MOVING_SOLIDS;
+
+				if (save->particles[i].pavg[0] > 32768)
+					save->particles[i].pavg[0] -= 65536;
+				if (save->particles[i].pavg[1] > 32768)
+					save->particles[i].pavg[1] -= 65536;
+			}
+		}
+	}
+
+	unsigned int animDataPos = 0;
+	for (unsigned i = 0; i < save->particlesCount; i++)
+	{
+		if (save->particles[i].type == PT_ANIM)
+		{
+			if (animDataPos >= save->ANIMdata.size())
+				break;
+
+			Save::ANIMdataItem data =  save->ANIMdata[animDataPos++];
+			// Read animation length, make sure it doesn't go past the current frame limit
+			int animLen = std::min(data.first, maxFrames-1);
+			save->particles[i].ctype = animLen;
+			save->particles[i].animations = (ARGBColour*)calloc(maxFrames, sizeof(ARGBColour));
+			if (save->particles[i].animations == NULL)
+				continue;
+
+			for (int j = 0; j < maxFrames; j++)
+			{
+				// Read animation data
+				if (j <= animLen)
+					save->particles[i].animations[j] = data.second[j];
+				// Set the rest to 0
+				else
+					save->particles[i].animations[j] = 0;
+			}
+		}
+	}
+#endif
+
 #ifdef LUACONSOLE
-	for (std::vector<std::string>::iterator iter = save->logMessages.begin(), end = save->logMessages.end(); begin != end; ++iter)
+	for (std::vector<std::string>::iterator iter = save->logMessages.begin(), end = save->logMessages.end(); iter != end; ++iter)
 	{
 		char *log = mystrdup((*iter).c_str());
 		luacon_log(log);
@@ -420,7 +507,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 	
 	if (!strcmp(svf_user, "jacob1") && replace == 1)
 	{
-		for (std::vector<std::string>::iterator iter = save->adminLogMessages.begin(), end = save->adminLogMessages.end(); begin != end; ++iter)
+		for (std::vector<std::string>::iterator iter = save->adminLogMessages.begin(), end = save->adminLogMessages.end(); iter != end; ++iter)
 		{
 			char *log = mystrdup((*iter).c_str());
 			luacon_log(log);

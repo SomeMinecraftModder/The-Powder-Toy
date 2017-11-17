@@ -25,6 +25,7 @@
 #include "BSON.h"
 #include "game/SaveInfo.h"
 #include "game/Sign.h"
+#include "graphics/ARGBColour.h"
 #include "json/json.h"
 #include "simulation/ElementNumbers.h"
 #include "simulation/Particle.h"
@@ -113,8 +114,14 @@ public:
 	bool displayModesPresent;
 	unsigned int colorMode;
 	bool colorModePresent;
+	typedef std::pair<int, int> MOVSdataItem;
+	std::vector<MOVSdataItem> MOVSdata;
+	typedef std::pair<int, std::vector<ARGBColour> > ANIMdataItem;
+	std::vector<ANIMdataItem> ANIMdata;
 	
 	Save();
+
+	int ParseSave(void *save, int size);
 
 	// converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up
 	// Newer saves use palette instead, this is only for old saves

@@ -315,8 +315,8 @@ def findLibs(env, conf):
 		FatalError("bzip2 headers not found")
 
 	#Look for libz
-	#if not conf.CheckLib('z'):
-	#	FatalError("libz not found or not installed")
+	if not conf.CheckLib('z'):
+		FatalError("libz not found or not installed")
 
 	#Look for pthreads
 	if not conf.CheckLib(['pthread', 'pthreadVC2']):
