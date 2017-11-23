@@ -1798,10 +1798,17 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 		//	MergeStampAuthorInfo(tempStampInfo);
 		
 		Save *save = new Save();
-		save->ParseSave(stampData, stampSize);
-		sim->LoadSave(loadPos.X, loadPos.Y, save, 0, !shiftHeld);
-		//MergeStampAuthorInfo(save->authors);
-		
+		try
+		{
+			save->ParseSave(stampData, stampSize);
+			sim->LoadSave(loadPos.X, loadPos.Y, save, 0, !shiftHeld);
+			MergeStampAuthorInfo(save->authors);
+		}
+		catch (ParseException e)
+		{
+			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
+		}
+
 		ResetStampState();
 		return;
 	}

@@ -325,6 +325,8 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 	gravity_mask();
 	air->RecalculateBlockAirMaps(this);
 
+	if (save->paused)
+		sys_pause = true;
 	if (replace >= 1)
 	{
 		legacy_enable = save->legacyEnable;
@@ -333,6 +335,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		if (!sys_pause || replace == 2)
 			sys_pause = save->paused;
 		airMode = save->airMode;
+		gravityMode = save->gravityMode;
 		if (save->msRotationPresent)
 			msRotation = save->msRotation;
 #ifndef NOMOD
@@ -408,7 +411,11 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				erase_bframe();
 		}
 
-		LuaCode = mystrdup(save->luaCode.c_str());
+		if (save->luaCode.length())
+		{
+			LuaCode = mystrdup(save->luaCode.c_str());
+			ranLuaCode = false;
+		}
 	}
 
 #ifndef NOMOD

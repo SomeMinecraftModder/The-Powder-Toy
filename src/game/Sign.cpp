@@ -57,10 +57,10 @@ Sign::Sign(std::string text, int x, int y, Justification justification):
 }
 
 Sign::Sign(const Sign & sign):
-	ju(sign.GetJustification()),
-	type(sign.GetType())
+	ju(sign.GetJustification())
 {
 	SetPos(sign.GetRealPos());
+	SetText(sign.GetText());
 }
 
 void Sign::SetText(std::string newText)

@@ -230,8 +230,8 @@ unsigned int Renderer::GetColorMode()
 	return colorMode;
 }
 
-// Called after Simulation::LoadSave. Used to load some renderer settings for specific saves
-void Renderer::LoadSave(Save *save, int replace)
+// Called when loading tabs. Used to load some renderer settings
+void Renderer::LoadSave(Save *save)
 {
 	if (!save)
 		return;

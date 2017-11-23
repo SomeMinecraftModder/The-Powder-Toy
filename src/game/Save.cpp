@@ -15,6 +15,7 @@
 
 #include <bzlib.h>
 #include <climits>
+#include <memory>
 #include "Save.h"
 #include "BSON.h"
 #include "hmap.h" // for firw_data
@@ -78,6 +79,7 @@ void Save::InitVars()
 	gravityMode = 0;
 	airMode = 0;
 	edgeMode = 0;
+	hasAmbientHeat = false;
 	// jacob1's mod
 	hudEnable = true;
 	hudEnablePresent = false;
@@ -230,9 +232,9 @@ int Save::ChangeWallpp(int wt)
 	return wt;
 }
 
-int Save::ParseSave(void *save, int size)
+void Save::ParseSave(void *save, int size)
 {
-	return ParseSaveOPS(save, size);
+	ParseSaveOPS(save, size);
 }
 
 void Save::CheckBsonFieldUser(bson_iterator iter, const char *field, unsigned char **data, unsigned int *fieldLen)
@@ -284,7 +286,7 @@ bool Save::CheckBsonFieldInt(bson_iterator iter, const char *field, int *setting
 	return false;
 }
 
-int Save::ParseSaveOPS(void *save, int size)
+void Save::ParseSaveOPS(void *save, int size)
 {
 	unsigned char *inputData = (unsigned char*)save, *bsonData = NULL, *partsData = NULL, *partsPosData = NULL, *fanData = NULL, *wallData = NULL, *soapLinkData = NULL;
 	unsigned char *pressData = NULL, *vxData = NULL, *vyData = NULL, *ambientData = NULL;
@@ -294,34 +296,36 @@ int Save::ParseSaveOPS(void *save, int size)
 	unsigned char *movsData = NULL, *animData = NULL;
 	unsigned int movsDataLen, animDataLen;
 #endif
-	unsigned *partsSimIndex = NULL;
-	unsigned int freeIndicesCount, returnCode = 0;
-	unsigned int *freeIndices = NULL;
 	unsigned int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
 	createdVersion = inputData[4];
-	bson b;
-	bson_iterator iter;
 
-	//Block sizes
+	bson b;
+	b.data = NULL;
+	bson_iterator iter;
+	auto bson_deleter = [](bson * b) { bson_destroy(b); };
+	// Use unique_ptr with a custom deleter to ensure that bson_destroy is called even when an exception is thrown
+	std::unique_ptr<bson, decltype(bson_deleter)> b_ptr(&b, bson_deleter);
+
+	// Block sizes
 	blockX = 0;
 	blockY = 0;
 	blockW = inputData[6];
 	blockH = inputData[7];
 
-	//Full size, normalized
+	// Full size, normalized
 	fullX = blockX*CELL;
 	fullY = blockY*CELL;
 	fullW = blockW*CELL;
 	fullH = blockH*CELL;
 
-	//Incompatible cell size
-	if (inputData[5] > CELL)
+	// Incompatible cell size
+	if (inputData[5] != CELL)
 	{
 		throw ParseException("Incorrect CELL size");
 	}
 
-	//Too large/off screen
-	if(blockX+blockW > XRES/CELL || blockY+blockH > YRES/CELL)
+	// Too large/off screen
+	if (blockX+blockW > XRES/CELL || blockY+blockH > YRES/CELL)
 	{
 		throw ParseException("Save too large");
 	}
@@ -333,12 +337,11 @@ int Save::ParseSaveOPS(void *save, int size)
 	bsonDataLen |= ((unsigned)inputData[10]) << 16;
 	bsonDataLen |= ((unsigned)inputData[11]) << 24;
 	
-	//Check for overflows, don't load saves larger than 200MB
+	// Check for overflows, don't load saves larger than 200MB
 	unsigned int toAlloc = bsonDataLen + 1;
 	if (toAlloc > 209715200 || !toAlloc)
 	{
-		fprintf(stderr, "Save data too large, refusing\n");
-		return 3;
+		throw ParseException("Save data too large");
 	}
 
 	bsonData = (unsigned char*)malloc(bsonDataLen+1);
@@ -346,8 +349,8 @@ int Save::ParseSaveOPS(void *save, int size)
 	{
 		throw ParseException("Could not allocate memory");
 	}
-	//Make sure bsonData is null terminated, since all string functions need null terminated strings
-	//(bson_iterator_key returns a pointer into bsonData, which is then used with strcmp)
+	// Make sure bsonData is null terminated, since all string functions need null terminated strings
+	// (bson_iterator_key returns a pointer into bsonData, which is then used with strcmp)
 	bsonData[bsonDataLen] = 0;
 
 	if (BZ2_bzBuffToBuffDecompress((char*)bsonData, (unsigned*)(&bsonDataLen), (char*)inputData+12, inputDataLen-12, 0, 0))
@@ -377,13 +380,13 @@ int Save::ParseSaveOPS(void *save, int size)
 		CheckBsonFieldBool(iter, "aheat_enable", &aheatEnable);
 		CheckBsonFieldBool(iter, "waterEEnabled", &waterEEnabled);
 		CheckBsonFieldBool(iter, "paused", &paused);
-		msRotationPresent = CheckBsonFieldBool(iter, "msrotation", &msRotation);
-		hudEnablePresent = CheckBsonFieldBool(iter, "hud_enable", &hudEnable);
+		msRotationPresent = CheckBsonFieldBool(iter, "msrotation", &msRotation) || msRotationPresent;
+		hudEnablePresent = CheckBsonFieldBool(iter, "hud_enable", &hudEnable) || hudEnablePresent;
 		CheckBsonFieldInt(iter, "gravityMode", &gravityMode);
 		CheckBsonFieldInt(iter, "airMode", &airMode);
 		CheckBsonFieldInt(iter, "edgeMode", &edgeMode);
-		activeMenuPresent = CheckBsonFieldInt(iter, "activeMenu", &activeMenu);
-		decorationsEnablePresent = CheckBsonFieldBool(iter, "decorations_enable", &decorationsEnable);
+		activeMenuPresent = CheckBsonFieldInt(iter, "activeMenu", &activeMenu) || activeMenuPresent;
+		decorationsEnablePresent = CheckBsonFieldBool(iter, "decorations_enable", &decorationsEnable) || decorationsEnablePresent;
 
 		if (!strcmp(bson_iterator_key(&iter), "signs"))
 		{
@@ -399,7 +402,7 @@ int Save::ParseSaveOPS(void *save, int size)
 						{
 							bson_iterator signiter;
 							bson_iterator_subiterator(&subiter, &signiter);
-							//Stop reading signs if we have no free spaces
+							// Stop reading signs if we have no free spaces
 							if (signs.size() >= MAXSIGNS)
 								break;
 
@@ -651,15 +654,12 @@ int Save::ParseSaveOPS(void *save, int size)
 	}
 
 
-	//Read wall and fan data
+	// Read wall and fan data
 	if (wallData)
 	{
 		unsigned int j = 0;
 		if (blockW * blockH > wallDataLen)
-		{
-			fprintf(stderr, "Not enough wall data\n");
-			goto fail;
-		}
+			throw ParseException("Not enough wall data");
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -684,16 +684,13 @@ int Save::ParseSaveOPS(void *save, int size)
 		}
 	}
 	
-	//Read pressure data
+	// Read pressure data
 	if (pressData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
 		if (blockW * blockH > pressDataLen)
-		{
-			fprintf(stderr, "Not enough pressure data\n");
-			goto fail;
-		}
+			throw ParseException("Not enough pressure data");
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -705,16 +702,13 @@ int Save::ParseSaveOPS(void *save, int size)
 		}
 	}
 
-	//Read vx data
+	// Read vx data
 	if (vxData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
-		if(blockW * blockH > vxDataLen)
-		{
-			fprintf(stderr, "Not enough vx data\n");
-			goto fail;
-		}
+		if (blockW * blockH > vxDataLen)
+			throw ParseException("Not enough vx data");
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -726,16 +720,13 @@ int Save::ParseSaveOPS(void *save, int size)
 		}
 	}
 
-	//Read vy data
+	// Read vy data
 	if (vyData)
 	{
 		unsigned int j = 0;
 		unsigned int i, i2;
-		if(blockW * blockH > vyDataLen)
-		{
-			fprintf(stderr, "Not enough vy data\n");
-			goto fail;
-		}
+		if (blockW * blockH > vyDataLen)
+			throw ParseException("Not enough vy data");
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -748,14 +739,12 @@ int Save::ParseSaveOPS(void *save, int size)
 	}
 
 	// Read ambient heat data
-	if (ambientData && aheat_enable)
+	if (ambientData)
 	{
 		unsigned int tempTemp, j = 0;
 		if (blockW * blockH > ambientDataLen)
-		{
-			fprintf(stderr, "Not enough ambient data\n");
-			goto fail;
-		}
+			throw ParseException("Not enough ambient heat data");
+		hasAmbientHeat = true;
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -767,133 +756,123 @@ int Save::ParseSaveOPS(void *save, int size)
 		}
 	}
 
-	//Read particle data
+	// Read particle data
 	if (partsData && partsPosData)
 	{
 		int newIndex = 0, fieldDescriptor, tempTemp;
 		int posCount, posTotal, partsPosDataIndex = 0;
 		if (fullW * fullH * 3 > partsPosDataLen)
-		{
-			fprintf(stderr, "Not enough particle position data\n");
-			goto fail;
-		}
-		freeIndicesCount = 0;
-		freeIndices = (unsigned int*)calloc(sizeof(unsigned int), NPART);
-		partsSimIndex = (unsigned*)calloc(NPART, sizeof(unsigned));
-		for (unsigned int i = 0; i < NPART; i++)
-		{
-			// keep a track of indices we can use
-			if (!particles[i].type)
-				freeIndices[freeIndicesCount++] = i;
-		}
+			throw ParseException("Not enough particle position data");
 		unsigned int i = 0, x, y;
 		for (unsigned int saved_y = 0; saved_y < fullH; saved_y++)
 		{
 			for (unsigned int saved_x = 0; saved_x < fullW; saved_x++)
 			{
-				//Read total number of particles at this position
+				// Read total number of particles at this position
 				posTotal = 0;
 				posTotal |= partsPosData[partsPosDataIndex++]<<16;
 				posTotal |= partsPosData[partsPosDataIndex++]<<8;
 				posTotal |= partsPosData[partsPosDataIndex++];
-				//Put the next posTotal particles at this position
+				// Put the next posTotal particles at this position
 				for (posCount = 0; posCount < posTotal; posCount++)
 				{
-					//i+3 because we have 4 bytes of required fields (type (1), descriptor (2), temp (1))
+					// i+3 because we have 4 bytes of required fields (type (1), descriptor (2), temp (1))
 					if (i+3 >= partsDataLen)
-						goto fail;
+						throw ParseException("Ran past particle data buffer");
 					x = saved_x + fullX;
 					y = saved_y + fullY;
 					fieldDescriptor = partsData[i+1];
 					fieldDescriptor |= partsData[i+2] << 8;
 					if (x >= XRES || y >= YRES)
-					{
-						fprintf(stderr, "Out of range [%d]: %d %d, [%d, %d], [%d, %d]\n", i, x, y, (unsigned)partsData[i+1], (unsigned)partsData[i+2], (unsigned)partsData[i+3], (unsigned)partsData[i+4]);
-						goto fail;
-					}
+						throw ParseException("Particle out of range");
 
 					if (newIndex < 0 || newIndex >= NPART)
-						goto fail;
+						throw ParseException("Too many particles");
 
-					//Store particles index+1 for this saved particle index (0 means not loaded)
-					partsSimIndex[particlesCount++] = newIndex + 1;
-
-					//Clear the particle, ready for our new properties
+					// Clear the particle, ready for our new properties
 					memset(&(particles[newIndex]), 0, sizeof(particle));
 					
-					//Required fields
+					// Required fields
 					particles[newIndex].type = partsData[i];
 					particles[newIndex].x = (float)x;
 					particles[newIndex].y = (float)y;
 					i+=3;
 
-					//Read temp
+					// Read temp
 					if (fieldDescriptor & 0x01)
 					{
-						//Full 16bit int
+						// Full 16bit int
 						tempTemp = partsData[i++];
 						tempTemp |= (((unsigned)partsData[i++]) << 8);
 						particles[newIndex].temp = (float)tempTemp;
 					}
 					else
 					{
-						//1 Byte room temp offset
+						// 1 Byte room temp offset
 						tempTemp = (signed char)partsData[i++];
 						particles[newIndex].temp = tempTemp+294.15f;
 					}
 					
-					//Read life
+					// Read life
 					if (fieldDescriptor & 0x02)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading life");
 						particles[newIndex].life = partsData[i++];
-						//Read 2nd byte
-						if(fieldDescriptor & 0x04)
+						// Read 2nd byte
+						if (fieldDescriptor & 0x04)
 						{
-							if(i >= partsDataLen) goto fail;
+							if (i >= partsDataLen)
+								throw ParseException("Ran past particle data buffer while loading life");
 							particles[newIndex].life |= (((unsigned)partsData[i++]) << 8);
 						}
 					}
 					
-					//Read tmp
+					// Read tmp
 					if (fieldDescriptor & 0x08)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading tmp");
 						particles[newIndex].tmp = partsData[i++];
-						//Read 2nd byte
-						if(fieldDescriptor & 0x10)
+						// Read 2nd byte
+						if (fieldDescriptor & 0x10)
 						{
-							if(i >= partsDataLen) goto fail;
+							if (i >= partsDataLen)
+								throw ParseException("Ran past particle data buffer while loading tmp");
 							particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 8);
-							//Read 3rd and 4th bytes
-							if(fieldDescriptor & 0x1000)
+							// Read 3rd and 4th bytes
+							if (fieldDescriptor & 0x1000)
 							{
-								if(i+1 >= partsDataLen) goto fail;
+								if (i+1 >= partsDataLen)
+									throw ParseException("Ran past particle data buffer while loading tmp");
 								particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 24);
 								particles[newIndex].tmp |= (((unsigned)partsData[i++]) << 16);
 							}
 						}
 					}
 					
-					//Read ctype
+					// Read ctype
 					if (fieldDescriptor & 0x20)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading ctype");
 						particles[newIndex].ctype = partsData[i++];
-						//Read additional bytes
-						if(fieldDescriptor & 0x200)
+						// Read additional bytes
+						if (fieldDescriptor & 0x200)
 						{
-							if(i+2 >= partsDataLen) goto fail;
+							if (i+2 >= partsDataLen)
+								throw ParseException("Ran past particle data buffer while loading ctype");
 							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 24);
 							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 16);
 							particles[newIndex].ctype |= (((unsigned)partsData[i++]) << 8);
 						}
 					}
 					
-					//Read dcolour
+					// Read dcolor
 					if (fieldDescriptor & 0x40)
 					{
-						if(i+3 >= partsDataLen) goto fail;
+						if (i+3 >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading deco");
 						unsigned char alpha = partsData[i++];
 						unsigned char red = partsData[i++];
 						unsigned char green = partsData[i++];
@@ -901,37 +880,42 @@ int Save::ParseSaveOPS(void *save, int size)
 						particles[newIndex].dcolour = COLARGB(alpha, red, green, blue);
 					}
 					
-					//Read vx
+					// Read vx
 					if (fieldDescriptor & 0x80)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading vx");
 						particles[newIndex].vx = (partsData[i++]-127.0f)/16.0f;
 					}
 					
-					//Read vy
+					// Read vy
 					if (fieldDescriptor & 0x100)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading vy");
 						particles[newIndex].vy = (partsData[i++]-127.0f)/16.0f;
 					}
 
-					//Read tmp2
+					// Read tmp2
 					if (fieldDescriptor & 0x400)
 					{
-						if(i >= partsDataLen) goto fail;
+						if (i >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading tmp2");
 						particles[newIndex].tmp2 = partsData[i++];
-						//Read 2nd byte
+						// Read 2nd byte
 						if (fieldDescriptor & 0x800)
 						{
-							if(i >= partsDataLen) goto fail;
+							if (i >= partsDataLen)
+								throw ParseException("Ran past particle data buffer while loading tmp2");
 							particles[newIndex].tmp2 |= (((unsigned)partsData[i++]) << 8);
 						}
 					}
 
-					//Read pavg (for moving solids)
+					// Read pavg
 					if (fieldDescriptor & 0x2000)
 					{
-						if(i+3 >= partsDataLen) goto fail;
+						if (i+3 >= partsDataLen)
+							throw ParseException("Ran past particle data buffer while loading pavg");
 						int pavg = partsData[i++];
 						pavg |= (((unsigned)partsData[i++]) << 8);
 						particles[newIndex].pavg[0] = (float)pavg;
@@ -942,18 +926,19 @@ int Save::ParseSaveOPS(void *save, int size)
 
 					if (modCreatedVersion && modCreatedVersion <= 20)
 					{
-						//Read flags (for instantly activated powered elements in my mod)
-						//now removed so that the partsData save format is exactly the same as tpt and won't cause errors
-						if(fieldDescriptor & 0x4000)
+						// Read flags (for instantly activated powered elements in my mod)
+						// now removed so that the partsData save format is exactly the same as tpt and won't cause errors
+						if (fieldDescriptor & 0x4000)
 						{
-							if(i >= partsDataLen) goto fail;
+							if (i >= partsDataLen)
+								throw ParseException("Ran past particle data buffer while loading flags");
 							particles[newIndex].flags = partsData[i++];
 						}
 					}
 
-					// no more particle properties to load, so we can change type here without messing up loading
+					// No more particle properties to load, so we can change type here without messing up loading
 					if (particles[newIndex].type == PT_SOAP)
-						// delete all soap connections, but it looks like if tmp & tmp2 were saved to 3 bytes, connections would load properly
+						// Delete all soap connections, but it looks like if tmp & tmp2 were saved to 3 bytes, connections would load properly
 						particles[newIndex].ctype &= ~6;
 
 					if (createdVersion < 81)
@@ -1022,13 +1007,14 @@ int Save::ParseSaveOPS(void *save, int size)
 							if (particles[newIndex].tmp)
 							{
 								particles[newIndex].ctype |= particles[newIndex].tmp<<8;
-								//particles[newIndex].tmp = 0;
+								// particles[newIndex].tmp = 0;
 							}
 						}
 					}
-					//note: PSv was used in version 77.0 and every version before, add something in PSv too if the element is that old
+					// Note: PSv was used in version 77.0 and every version before, add something in PSv too if the element is that old
 
 					newIndex++;
+					particlesCount++;
 				}
 			}
 		}
@@ -1048,17 +1034,16 @@ int Save::ParseSaveOPS(void *save, int size)
 			unsigned int animDataPos = 0;
 			for (unsigned i = 0; i < particlesCount; i++)
 			{
-				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_ANIM)
+				if (particles[i].type == PT_ANIM)
 				{
 					if (animDataPos >= animDataLen)
 						break;
 
 					ANIMdataItem data;
-					newIndex = partsSimIndex[i]-1;
 					int animLen = animData[animDataPos++];
 					data.first = animLen;
 					if (animDataPos+4*animLen > animDataLen)
-						goto fail;
+						throw ParseException("Ran past particle data buffer while loading animation data");
 
 					for (int j = 0; j < animLen; j++)
 					{
@@ -1078,7 +1063,7 @@ int Save::ParseSaveOPS(void *save, int size)
 			unsigned int soapLinkDataPos = 0;
 			for (unsigned int i = 0; i < particlesCount; i++)
 			{
-				if (partsSimIndex[i] && particles[partsSimIndex[i]-1].type == PT_SOAP)
+				if (particles[i].type == PT_SOAP)
 				{
 					// Get the index of the particle forward linked from this one, if present in the save data
 					unsigned int linkedIndex = 0;
@@ -1086,39 +1071,26 @@ int Save::ParseSaveOPS(void *save, int size)
 					linkedIndex |= soapLinkData[soapLinkDataPos++]<<16;
 					linkedIndex |= soapLinkData[soapLinkDataPos++]<<8;
 					linkedIndex |= soapLinkData[soapLinkDataPos++];
-					// All indexes in soapLinkData and partsSimIndex have 1 added to them (0 means not saved/loaded)
-					if (!linkedIndex || linkedIndex-1>=particlesCount || !partsSimIndex[linkedIndex-1])
+					// All indexes in soapLinkData have 1 added to them (0 means not saved/loaded)
+					if (!linkedIndex || linkedIndex-1 >= particlesCount)
 						continue;
-					linkedIndex = partsSimIndex[linkedIndex-1]-1;
-					newIndex = partsSimIndex[i]-1;
+					linkedIndex = linkedIndex-1;
 
-					//Attach the two particles
-					particles[newIndex].ctype |= 2;
-					particles[newIndex].tmp = linkedIndex;
+					// Attach the two particles
+					particles[i].ctype |= 2;
+					particles[i].tmp = linkedIndex;
 					particles[linkedIndex].ctype |= 4;
-					particles[linkedIndex].tmp2 = newIndex;
+					particles[linkedIndex].tmp2 = i;
 				}
 			}
 		}
 	}
 
 	if (androidCreatedVersion)
-		adminLogMessages.push_back("Made in android build version " + androidCreatedVersion);
+		adminLogMessages.push_back("Made in android build version " + Format::NumberToString<int>(androidCreatedVersion));
 
 	if (modCreatedVersion && !androidCreatedVersion)
-		adminLogMessages.push_back("Made in jacob1's mod version " + modCreatedVersion);
-
-	goto fin;
-fail:
-	//Clean up everything
-	returnCode = 1;
-fin:
-	bson_destroy(&b);
-	if(freeIndices)
-		free(freeIndices);
-	if(partsSimIndex)
-		free(partsSimIndex);
-	return returnCode;
+		adminLogMessages.push_back("Made in jacob1's mod version " + Format::NumberToString<int>(modCreatedVersion));
 }
 
 template <typename T>

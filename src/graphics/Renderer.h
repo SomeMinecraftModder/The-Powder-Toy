@@ -72,7 +72,7 @@ public:
 	void XORColorMode(unsigned int color_mode);
 	unsigned int GetColorMode();
 
-	void LoadSave(Save *save, int replace);
+	void LoadSave(Save *save);
 };
 
 #endif // RENDERER_H

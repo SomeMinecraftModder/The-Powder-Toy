@@ -81,6 +81,7 @@
 #include "game/Authors.h"
 #include "game/Brush.h"
 #include "game/Menus.h"
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "game/ToolTip.h"
 #include "game/Download.h"
@@ -639,10 +640,24 @@ int tab_load(int tabNum, bool del)
 	saveData = file_load(fileName, &saveSize);
 	if (saveData)
 	{
+		// Prevent crash loops on startup
 		if (del)
-			remove(fileName); //prevent crash loops on startup
+			remove(fileName);
 		Snapshot::TakeSnapshot(globalSim);
-		parse_save(saveData, saveSize, 2, 0, 0, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, pmap, &authors);
+
+		Save *save = new Save();
+		try
+		{
+			save->ParseSave(saveData, saveSize);
+			globalSim->LoadSave(0, 0, save, 2);
+			Renderer::Ref().LoadSave(save);
+			authors = save->authors;
+		}
+		catch (ParseException e)
+		{
+			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
+		}
+
 		if (!svf_last) //only free if reload button isn't active
 		{
 			free(saveData);

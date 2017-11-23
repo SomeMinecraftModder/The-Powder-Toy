@@ -121,7 +121,7 @@ public:
 	
 	Save();
 
-	int ParseSave(void *save, int size);
+	void ParseSave(void *save, int size);
 
 	// converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up
 	// Newer saves use palette instead, this is only for old saves
@@ -143,7 +143,7 @@ private:
 	void CheckBsonFieldUser(bson_iterator iter, const char *field, unsigned char **data, unsigned int *fieldLen);
 	bool CheckBsonFieldBool(bson_iterator iter, const char *field, bool *flag);
 	bool CheckBsonFieldInt(bson_iterator iter, const char *field, int *setting);
-	int ParseSaveOPS(void *save, int size);
+	void ParseSaveOPS(void *save, int size);
 
 	// used to convert author data between bson and json
 	// only supports the minimum amount of conversion we need
