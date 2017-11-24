@@ -175,7 +175,44 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		hasPalette = true;
 	}
 
+#ifndef NOMOD
+	// Solids is a map of the old .tmp2 it was saved with, to the new ball number it is getting
+	int solids[MAX_MOVING_SOLIDS];
+	// Default to invalid ball
+	std::fill(&solids[0], &solids[MAX_MOVING_SOLIDS], MAX_MOVING_SOLIDS);
+	if (save->MOVSdata.size())
+	{
+		int numBalls = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetNumBalls();
+		for (std::vector<Save::MOVSdataItem>::iterator iter = save->MOVSdata.begin(), end = save->MOVSdata.end(); iter != end; ++iter)
+		{
+			Save::MOVSdataItem data = *iter;
+			int bn = data.first;
+			if (bn >= 0 && bn < MAX_MOVING_SOLIDS)
+			{
+				solids[bn] = numBalls;
+				MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(numBalls++);
+				// Create a moving solid and clear all its variables
+				if (movingSolid)
+				{
+					movingSolid->Simulation_Cleared();
+					// Set its rotation
+					movingSolid->rotationOld = movingSolid->rotation = data.second/20.0f - 2*M_PI;
+				}
+			}
+		}
+		// New number of known moving solids
+		((MOVS_ElementDataContainer*)elementData[PT_MOVS])->SetNumBalls(numBalls);
+	}
+
+	unsigned int animDataPos = 0;
+#endif
+
 	int i, r;
+	// map of actual particle IDs back to save particle IDs. Currently used to update soap links
+	//unsigned int particleIDMap[NPART];
+	//std::fill(&particleIDMap[0], &particleIDMap[NPART], NPART);
+	//list of soap particles loaded into this save
+	std::map<unsigned int, unsigned int> soapList;
 	for (unsigned int n = 0; n < NPART && n < save->particlesCount; n++)
 	{
 		particle tempPart = save->particles[n];
@@ -261,6 +298,8 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 
 			elementCount[tempPart.type]++;
 		}
+		//if (i >= 0 && i < NPART)
+		//	particleIDMap[i] = n;
 
 		if (parts[i].type == PT_STKM)
 		{
@@ -287,8 +326,93 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				// should not be possible because we verify with CanAlloc above this
 				parts[i].type = PT_NONE;
 		}
+		else if (parts[i].type == PT_SOAP)
+		{
+			soapList.insert(std::pair<unsigned int, unsigned int>(n, i));
+		}
+#ifndef NOMOD
+		// special handling for MOVS: ensure it is valid, and fix issues with signed values in pavg
+		else if (parts[i].type == PT_MOVS)
+		{
+			if ((parts[i].flags&FLAG_DISAPPEAR) || parts[i].tmp2 < 0 || parts[i].tmp2 >= MAX_MOVING_SOLIDS)
+				parts[i].tmp2 = MAX_MOVING_SOLIDS;
+			else
+			{
+				parts[i].tmp2 = solids[parts[i].tmp2];
+				MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(parts[i].tmp2);
+				if (movingSolid)
+				{
+					// Increase ball particle count
+					movingSolid->particleCount++;
+					// Set center "controlling" particle
+					if (parts[i].pavg[0] == 0 && parts[i].pavg[1] == 0)
+						movingSolid->index = i+1;
+				}
+			}
+
+			if (parts[i].pavg[0] > 32768)
+				parts[i].pavg[0] -= 65536;
+			if (parts[i].pavg[1] > 32768)
+				parts[i].pavg[1] -= 65536;
+		}
+		else if (parts[i].type == PT_ANIM)
+		{
+			if (animDataPos >= save->ANIMdata.size())
+			{
+				parts[i].type = PT_NONE;
+				continue;
+			}
+
+			Save::ANIMdataItem data =  save->ANIMdata[animDataPos++];
+			// Read animation length, make sure it doesn't go past the current frame limit
+			int animLen = std::min(data.first, maxFrames-1);
+			parts[i].ctype = animLen;
+			parts[i].animations = (ARGBColour*)calloc(maxFrames, sizeof(ARGBColour));
+			if (parts[i].animations == NULL)
+				continue;
+
+			for (int j = 0; j < maxFrames; j++)
+			{
+				// Read animation data
+				if (j <= animLen && j < (int)data.second.size())
+					parts[i].animations[j] = data.second[j];
+				// Set the rest to 0
+				else
+					parts[i].animations[j] = 0;
+			}
+		}
+#endif
 	}
-	//parts_lastActiveIndex = NPART-1;
+
+	// fix SOAP links using soapList, a map of old particle ID -> new particle ID
+	// loop through every old particle (loaded from save), and convert .tmp / .tmp2
+	for (std::map<unsigned int, unsigned int>::iterator iter = soapList.begin(), end = soapList.end(); iter != end; ++iter)
+	{
+		int i = (*iter).second;
+		if ((parts[i].ctype & 0x2) == 2)
+		{
+			auto n = soapList.find(parts[i].tmp);
+			if (n != end)
+				parts[i].tmp = n->second;
+			else
+			{
+				parts[i].tmp = 0;
+				parts[i].ctype ^= 2;
+			}
+		}
+		if ((parts[i].ctype & 0x4) == 4)
+		{
+			auto n = soapList.find(parts[i].tmp2);
+			if (n != end)
+				parts[i].tmp2 = n->second;
+			else
+			{
+				parts[i].tmp2 = 0;
+				parts[i].ctype ^= 4;
+			}
+		}
+	}
+
 	for (size_t i = 0; i < save->signs.size() && signs.size() < MAXSIGNS; i++)
 	{
 		if (save->signs[i].GetText().length())
@@ -310,9 +434,12 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			}
 			if (includePressure)
 			{
-				air->pv[saveBlockY+blockY][saveBlockX+blockX] = save->pressure[saveBlockY][saveBlockX];
-				air->vx[saveBlockY+blockY][saveBlockX+blockX] = save->velocityX[saveBlockY][saveBlockX];
-				air->vy[saveBlockY+blockY][saveBlockX+blockX] = save->velocityY[saveBlockY][saveBlockX];
+				if (save->hasPressure)
+				{
+					air->pv[saveBlockY+blockY][saveBlockX+blockX] = save->pressure[saveBlockY][saveBlockX];
+					air->vx[saveBlockY+blockY][saveBlockX+blockX] = save->velocityX[saveBlockY][saveBlockX];
+					air->vy[saveBlockY+blockY][saveBlockX+blockX] = save->velocityY[saveBlockY][saveBlockX];
+				}
 				if (save->hasAmbientHeat)
 					air->hv[saveBlockY+blockY][saveBlockX+blockX] = save->ambientHeat[saveBlockY][saveBlockX];
 			}
@@ -417,93 +544,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			ranLuaCode = false;
 		}
 	}
-
-#ifndef NOMOD
-	if (save->MOVSdata.size())
-	{
-		int movsDataPos = 0, numBalls = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetNumBalls();
-		// Solids is a map of the old .tmp2 it was saved with, to the new ball number it is getting
-		int solids[MAX_MOVING_SOLIDS];
-		// Default to invalid ball
-		std::fill(&solids[0], &solids[MAX_MOVING_SOLIDS], MAX_MOVING_SOLIDS);
-		for (std::vector<Save::MOVSdataItem>::iterator iter = save->MOVSdata.begin(), end = save->MOVSdata.end(); iter != end; ++iter)
-		{
-			Save::MOVSdataItem data = *iter;
-			int bn = data.first;
-			if (bn >= 0 && bn < MAX_MOVING_SOLIDS)
-			{
-				solids[bn] = numBalls;
-				MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(numBalls++);
-				// Create a moving solid and clear all its variables
-				if (movingSolid)
-				{
-					movingSolid->Simulation_Cleared();
-					// Set its rotation
-					movingSolid->rotationOld = movingSolid->rotation = data.second/20.0f - 2*M_PI;
-				}
-			}
-			else
-				movsDataPos++;
-		}
-		// New number of known moving solids
-		((MOVS_ElementDataContainer*)elementData[PT_MOVS])->SetNumBalls(numBalls);
-		for (unsigned int i = 0; i < save->particlesCount; i++)
-		{
-			if (save->particles[i].type == PT_MOVS)
-			{
-				if (!(save->particles[i].flags&FLAG_DISAPPEAR) && save->particles[i].tmp2 >= 0 && save->particles[i].tmp2 < MAX_MOVING_SOLIDS)
-				{
-					save->particles[i].tmp2 = solids[save->particles[i].tmp2];
-					MovingSolid *movingSolid = ((MOVS_ElementDataContainer*)elementData[PT_MOVS])->GetMovingSolid(save->particles[i].tmp2);
-					if (movingSolid)
-					{
-						// Increase ball particle count
-						movingSolid->particleCount++;
-						// Set center "controlling" particle
-						if (save->particles[i].pavg[0] == 0 && save->particles[i].pavg[1] == 0)
-							movingSolid->index = i+1;
-					}
-				}
-				else
-					// Default to invalid ball
-					save->particles[i].tmp2 = MAX_MOVING_SOLIDS;
-
-				if (save->particles[i].pavg[0] > 32768)
-					save->particles[i].pavg[0] -= 65536;
-				if (save->particles[i].pavg[1] > 32768)
-					save->particles[i].pavg[1] -= 65536;
-			}
-		}
-	}
-
-	unsigned int animDataPos = 0;
-	for (unsigned i = 0; i < save->particlesCount; i++)
-	{
-		if (save->particles[i].type == PT_ANIM)
-		{
-			if (animDataPos >= save->ANIMdata.size())
-				break;
-
-			Save::ANIMdataItem data =  save->ANIMdata[animDataPos++];
-			// Read animation length, make sure it doesn't go past the current frame limit
-			int animLen = std::min(data.first, maxFrames-1);
-			save->particles[i].ctype = animLen;
-			save->particles[i].animations = (ARGBColour*)calloc(maxFrames, sizeof(ARGBColour));
-			if (save->particles[i].animations == NULL)
-				continue;
-
-			for (int j = 0; j < maxFrames; j++)
-			{
-				// Read animation data
-				if (j <= animLen)
-					save->particles[i].animations[j] = data.second[j];
-				// Set the rest to 0
-				else
-					save->particles[i].animations[j] = 0;
-			}
-		}
-	}
-#endif
 
 #ifdef LUACONSOLE
 	for (std::vector<std::string>::iterator iter = save->logMessages.begin(), end = save->logMessages.end(); iter != end; ++iter)

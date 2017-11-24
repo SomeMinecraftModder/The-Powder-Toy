@@ -61,6 +61,7 @@ public:
 	float ** fanVelX;
 	float ** fanVelY;
 	float ** pressure;
+	bool hasPressure;
 	float ** velocityX;
 	float ** velocityY;
 	float ** ambientHeat;

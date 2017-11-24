@@ -79,6 +79,7 @@ void Save::InitVars()
 	gravityMode = 0;
 	airMode = 0;
 	edgeMode = 0;
+	hasPressure = false;
 	hasAmbientHeat = false;
 	// jacob1's mod
 	hudEnable = true;
@@ -691,6 +692,7 @@ void Save::ParseSaveOPS(void *save, int size)
 		unsigned int i, i2;
 		if (blockW * blockH > pressDataLen)
 			throw ParseException("Not enough pressure data");
+		hasPressure = true;
 		for (unsigned int x = 0; x < blockW; x++)
 		{
 			for (unsigned int y = 0; y < blockH; y++)
@@ -1045,7 +1047,7 @@ void Save::ParseSaveOPS(void *save, int size)
 					if (animDataPos+4*animLen > animDataLen)
 						throw ParseException("Ran past particle data buffer while loading animation data");
 
-					for (int j = 0; j < animLen; j++)
+					for (int j = 0; j <= animLen; j++)
 					{
 						unsigned char alpha = animData[animDataPos++];
 						unsigned char red = animData[animDataPos++];
