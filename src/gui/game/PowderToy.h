@@ -6,10 +6,11 @@
 #include "graphics/Pixel.h"
 
 class Button;
-class VideoBuffer;
 class Download;
 class ToolTip;
+class Save;
 class Simulation;
+class VideoBuffer;
 class PowderToy : public Window_
 {
 public:
@@ -66,11 +67,14 @@ private:
 	// Simulation object
 	Simulation * sim;
 
+	// used when reloading saves / local saves / tabs
+	Save * reloadSave;
+
 	// loading stamps
 	StampState state;
 	Point loadPos;
 	Point loadSize;
-	void *stampData;
+	char *stampData;
 	int stampSize;
 	pixel *stampImg;
 	bool waitToDraw; // wait a frame to draw stamp after load, because it will be in the wrong spot until another mouse event comes in
@@ -86,7 +90,7 @@ private:
 	// saving stamps
 	Point savePos;
 	Point saveSize;
-	void *clipboardData;
+	char *clipboardData;
 	int clipboardSize;
 
 	// bottom bar buttons
@@ -155,6 +159,9 @@ public:
 	int GetZoomWindowSize() { return zoomSize; }
 	int GetZoomWindowFactor() { return zoomFactor; }
 
+	void ReloadSave();
+	void SetReloadPoint(Save * reloadSave);
+
 	// stamp stuff (so main() can get needed info)
 	void UpdateStampCoordinates(Point cursor, Point offset = Point(0, 0));
 	StampState GetStampState() { return state; }
@@ -183,27 +190,30 @@ public:
 	bool BeforeKeyPress(int key, unsigned short character, unsigned short modifiers);
 	bool BeforeKeyRelease(int key, unsigned short character, unsigned short modifiers);
 
-	void OpenBrowser(unsigned char b);
-	void ReloadSave(unsigned char b);
-	void DoSave(unsigned char b);
-	void DoVote(bool up);
-	void OpenTags();
-	void ReportBug();
-	void OpenOptions();
-	void LoginButton();
-	void RenderOptions();
+	void OpenBrowserBtn(unsigned char b);
+	void ReloadSaveBtn(unsigned char b);
+	void DoSaveBtn(unsigned char b);
+	void DoVoteBtn(bool up);
+	void OpenTagsBtn();
+	void ReportBugBtn();
+	void OpenOptionsBtn();
+	void LoginBtn();
+	void RenderOptionsBtn();
+	void TogglePauseBtn();
+	void SetPauseBtn(bool pause);
+
 	void TogglePause();
 	void SetPause(bool pause);
-	
+
 	bool IsinsideRenderOptions() { return insideRenderOptions; }
 	void LoadRenderPreset(int preset);
 
 #ifdef TOUCHUI
-	void ToggleErase(bool alt);
-	void OpenConsole(bool alt);
-	void ToggleSetting(bool alt);
-	void StartZoom(bool alt);
-	void SaveStamp(bool alt);
+	void ToggleEraseBtn(bool alt);
+	void OpenConsoleBtn(bool alt);
+	void ToggleSettingBtn(bool alt);
+	void StartZoomBtn(bool alt);
+	void SaveStampBtn(bool alt);
 #endif
 };
 

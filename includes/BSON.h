@@ -26,7 +26,6 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdarg.h>
-#include "defines.h"
 
 #include "common/tpt-stdint.h" 
 

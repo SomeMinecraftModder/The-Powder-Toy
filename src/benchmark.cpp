@@ -8,7 +8,9 @@
 #include "powdergraphics.h"
 #include "benchmark.h"
 #include "save.h"
+
 #include "common/Point.h"
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "graphics/Pixel.h"
 #include "json/json.h"
@@ -57,6 +59,19 @@ double benchmark_get_time()
 		printf("mean time per iteration %g ms\n", bench_mean/bench_iterations * 1000.0);\
 }
 
+bool benchmark_load_save(Simulation *sim, Save *save)
+{
+	try
+	{
+		sim->LoadSave(0, 0, save, 1);
+	}
+	catch (ParseException e)
+	{
+		printf("Error loading save: %s", e.what());
+		return true;
+	}
+	return false;
+}
 
 void benchmark_run()
 {
@@ -66,20 +81,18 @@ void benchmark_run()
 	if (benchmark_file)
 	{
 		int size;
-		char *file_data;
-		Json::Value temp;
-		file_data = (char*)file_load(benchmark_file, &size);
+		char *file_data = (char*)file_load(benchmark_file, &size);
+		Save *save = new Save(file_data, size);
 		if (file_data)
 		{
-			if(!parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp))
+			if (!benchmark_load_save(sim, save))
 			{
 				printf("Save speed test:\n");
 
 				printf("Update particles+air: ");
 				BENCHMARK_INIT(benchmark_repeat_count, 200)
 				{
-					temp.clear();
-					parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+					benchmark_load_save(sim, save);
 					sys_pause = false;
 					framerender = 0;
 					BENCHMARK_RUN()
@@ -96,8 +109,7 @@ void benchmark_run()
 				{
 					BENCHMARK_RUN()
 					{
-						temp.clear();
-						parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+						benchmark_load_save(sim, save);
 					}
 				}
 				BENCHMARK_END()
@@ -105,8 +117,7 @@ void benchmark_run()
 				printf("Update particles - paused: ");
 				BENCHMARK_INIT(benchmark_repeat_count, 1000)
 				{
-					temp.clear();
-					parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+					benchmark_load_save(sim, save);
 					sys_pause = true;
 					framerender = 0;
 					BENCHMARK_RUN()
@@ -119,8 +130,7 @@ void benchmark_run()
 				printf("Update particles - unpaused: ");
 				BENCHMARK_INIT(benchmark_repeat_count, 200)
 				{
-					temp.clear();
-					parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+					benchmark_load_save(sim, save);
 					sys_pause = false;
 					framerender = 0;
 					BENCHMARK_RUN()
@@ -133,8 +143,7 @@ void benchmark_run()
 				printf("Render particles: ");
 				BENCHMARK_INIT(benchmark_repeat_count, 1500)
 				{
-					temp.clear();
-					parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+					benchmark_load_save(sim, save);
 					sys_pause = false;
 					framerender = 0;
 					display_mode = 0;
@@ -151,8 +160,7 @@ void benchmark_run()
 				printf("Render particles+fire: ");
 				BENCHMARK_INIT(benchmark_repeat_count, 1200)
 				{
-					temp.clear();
-					parse_save(file_data, size, 1, 0, 0, bmap, sim->air->fvx, sim->air->fvy, sim->air->vx, sim->air->vy, sim->air->pv, signs, parts, pmap, &temp);
+					benchmark_load_save(sim, save);
 					sys_pause = false;
 					framerender = 0;
 					display_mode = 0;
@@ -178,6 +186,10 @@ void benchmark_run()
 		clear_sim();
 
 		gravity_init();
+#ifdef GRAVFFT
+	if (!grav_fft_status)
+		grav_fft_init();
+#endif
 		update_grav();
 		printf("Gravity - no gravmap changes: ");
 		BENCHMARK_START(benchmark_repeat_count, 100000)

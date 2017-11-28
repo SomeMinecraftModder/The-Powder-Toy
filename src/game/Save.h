@@ -51,6 +51,8 @@ public:
 class Save
 {
 public:
+	bool expanded;
+
 	unsigned int blockWidth;
 	unsigned int blockHeight;
 	unsigned int particlesCount;
@@ -102,6 +104,7 @@ public:
 	bool activeMenuPresent;
 	bool decorationsEnable;
 	bool decorationsEnablePresent;
+	bool legacyHeatSave;
 
 	typedef std::pair<std::string, int> PaletteItem;
 	std::vector<PaletteItem> palette;
@@ -119,16 +122,24 @@ public:
 	std::vector<MOVSdataItem> MOVSdata;
 	typedef std::pair<int, std::vector<ARGBColour> > ANIMdataItem;
 	std::vector<ANIMdataItem> ANIMdata;
-	
-	Save();
 
-	void ParseSave(void *save, int size);
+	Save(char * saveData, int saveSize);
+	Save(const Save & save);
+	~Save();
+
+	void ParseSave();
 
 	// converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up
 	// Newer saves use palette instead, this is only for old saves
 	int FixType(int type);
 
 private:
+	unsigned char *saveData;
+	int saveSize;
+
+	Save();
+	void Dealloc();
+
 	void InitData();
 	void SetSize(int newWidth, int newHeight);
 	void InitVars();
@@ -144,7 +155,8 @@ private:
 	void CheckBsonFieldUser(bson_iterator iter, const char *field, unsigned char **data, unsigned int *fieldLen);
 	bool CheckBsonFieldBool(bson_iterator iter, const char *field, bool *flag);
 	bool CheckBsonFieldInt(bson_iterator iter, const char *field, int *setting);
-	void ParseSaveOPS(void *save, int size);
+	void ParseSaveOPS();
+	void ParseSavePSv();
 
 	// used to convert author data between bson and json
 	// only supports the minimum amount of conversion we need

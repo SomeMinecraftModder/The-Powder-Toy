@@ -14,6 +14,7 @@
  */
 
 #include "simulation/ElementsCommon.h"
+#include "simulation/GolNumbers.h"
 
 int CONV_update(UPDATE_FUNC_ARGS)
 {

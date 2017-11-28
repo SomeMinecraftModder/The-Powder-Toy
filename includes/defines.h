@@ -125,8 +125,6 @@ const int menuIconWidth = 17;
 //#define SAVE_OPS
 //#define REALISTIC
 
-#define NGOL 24
-
 #define SURF_RANGE     10
 #define NORMAL_MIN_EST 3
 #define NORMAL_INTERP  20
@@ -159,9 +157,6 @@ union PropertyValue
 #define DEBUG_PARTICLE_UPDATES	0x0008
 
 typedef unsigned char uint8;
-
-extern char * saveDataOpen;
-extern int saveDataOpenSize;
 
 #ifdef INTERNAL
 	extern int vs;
@@ -278,7 +273,7 @@ void clear_sim();
 void NewSim();
 char* stamp_save(int x, int y, int w, int h, bool includePressure);
 void tab_save(int num, char reloadButton);
-void *stamp_load(int i, int *size, int reorder);
+char *stamp_load(int i, int *size, int reorder);
 int tab_load(int tabNum, bool del = false);
 void stamp_init();
 void del_stamp(int d);

@@ -163,8 +163,6 @@ extern char svf_name[64];
 extern char svf_tags[256];
 extern char svf_description[255];
 extern char svf_author[64];
-extern void *svf_last;
-extern int svf_lsize;
 
 extern char *search_ids[GRID_X*GRID_Y];
 extern char *search_dates[GRID_X*GRID_Y];

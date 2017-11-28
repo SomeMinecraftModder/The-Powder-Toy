@@ -218,8 +218,7 @@ float mheat = 0.0f;
 
 int ptsaveOpenID = 0;
 int saveURIOpen = 0;
-char * saveDataOpen = NULL;
-int saveDataOpenSize = 0;
+Save * saveDataOpen = NULL;
 
 #ifdef INTERNAL
 	int vs = 0;
@@ -400,10 +399,7 @@ void NewSim()
 	svf_author[0] = 0;
 	gravityMode = 0;
 	airMode = 0;
-	if (svf_last)
-		free(svf_last);
-	svf_last = NULL;
-	svf_lsize = 0;
+	the_game->SetReloadPoint(NULL);
 }
 
 // stamps library
@@ -577,16 +573,7 @@ void tab_save(int num, char reloadButton)
 		return;
 	fwrite(saveData, fileSize, 1, f);
 	fclose(f);
-
-	if (!reloadButton)
-		free(saveData);
-	else
-	{
-		if (svf_last)
-			free(svf_last);
-		svf_last = saveData;
-		svf_lsize = fileSize;
-	}
+	free(saveData);
 
 	//set the tab's name
 	if (strlen(svf_name))
@@ -604,9 +591,9 @@ void tab_save(int num, char reloadButton)
 	tabThumbnails[num-1] = rescale_img(vid_buf, XRES+BARSIZE, YRES, &fileSize, &fileSize, 3);
 }
 
-void *stamp_load(int i, int *size, int reorder)
+char *stamp_load(int i, int *size, int reorder)
 {
-	void *data;
+	char *data;
 	char fn[64];
 	struct stamp tmp;
 
@@ -614,7 +601,7 @@ void *stamp_load(int i, int *size, int reorder)
 		return NULL;
 
 	sprintf(fn, "stamps" PATH_SEP "%s.stm", stamps[i].name);
-	data = file_load(fn, size);
+	data = (char*)file_load(fn, size);
 	if (!data)
 		return NULL;
 
@@ -632,12 +619,12 @@ void *stamp_load(int i, int *size, int reorder)
 
 int tab_load(int tabNum, bool del)
 {
-	void *saveData;
+	char *saveData;
 	int saveSize;
 	char fileName[64];
 
 	sprintf(fileName, "tabs" PATH_SEP "%d.stm", tabNum);
-	saveData = file_load(fileName, &saveSize);
+	saveData = (char*)file_load(fileName, &saveSize);
 	if (saveData)
 	{
 		// Prevent crash loops on startup
@@ -645,25 +632,24 @@ int tab_load(int tabNum, bool del)
 			remove(fileName);
 		Snapshot::TakeSnapshot(globalSim);
 
-		Save *save = new Save();
+		Save *save = new Save(saveData, saveSize);
+		bool ret = false;
 		try
 		{
-			save->ParseSave(saveData, saveSize);
 			globalSim->LoadSave(0, 0, save, 2);
 			Renderer::Ref().LoadSave(save);
 			authors = save->authors;
+			the_game->SetReloadPoint(save);
+			ret = true;
 		}
 		catch (ParseException e)
 		{
 			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
 		}
 
-		if (!svf_last) //only free if reload button isn't active
-		{
-			free(saveData);
-			saveData = NULL;
-		}
-		return 1;
+		delete save;
+		free(saveData);
+		return ret;
 	}
 	return 0;
 }
@@ -1113,7 +1099,6 @@ void SigHandler(int signal)
 	int afk = 0, afkstart = 0, lastx = 1, lasty = 0; // afk tracking for stats
 	bool mouseInZoom = false;
 	int username_flash = 0, username_flash_t = 1;
-	int saveOpenError = 0;
 	Download *sessionCheck = NULL;
 #if !defined(DEBUG) && !defined(_DEBUG)
 	int signal_hooks = 0;
@@ -1189,7 +1174,10 @@ int main(int argc, char *argv[])
 		}
 		else if (!strncmp(argv[i], "open", 5) && i+1<argc)
 		{
-			saveDataOpen = (char*)file_load(argv[i+1], &saveDataOpenSize);
+			int openDataSize;
+			char *openData = (char*)file_load(argv[i+1], &openDataSize);
+			saveDataOpen = new Save(openData, openDataSize);
+			free(openData);
 			i++;
 		}
 	}
@@ -1326,12 +1314,6 @@ int main(int argc, char *argv[])
 	prepare_graphicscache();
 	flm_data = generate_gradient(flm_data_colours, flm_data_pos, flm_data_points, 200);
 	plasma_data = generate_gradient(plasma_data_colours, plasma_data_pos, plasma_data_points, 200);
-	
-	if(saveOpenError)
-	{
-		saveOpenError = 0;
-		error_ui(vid_buf, 0, "Unable to open save file.");
-	}
 
 #ifdef LUACONSOLE
 	lua_vid_buf = the_game->GetVid()->GetVid();
@@ -1569,18 +1551,18 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 			//Clear all settings and simulation data
 			NewSim();
 			UpdateToolTip(it_msg, Point(16, 20), INTROTIP, 0);
-			
-			svf_last = saveDataOpen;
-			svf_lsize = saveDataOpenSize;
-			if(parse_save(saveDataOpen, saveDataOpenSize, 1, 0, 0, bmap, globalSim->air->fvx, globalSim->air->fvy, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, signs, parts, pmap, &authors))
+
+			try
 			{
-				saveOpenError = 1;
-				svf_last = NULL;
-				svf_lsize = 0;
-				free(saveDataOpen);
+				globalSim->LoadSave(0, 0, saveDataOpen, 1);
+				authors = saveDataOpen->authors;
+				the_game->SetReloadPoint(saveDataOpen);
 			}
-			saveDataOpenSize = 0;
-			saveDataOpen = NULL;
+			catch (ParseException e)
+			{
+				Engine::Ref().ShowWindow(new ErrorPrompt("Unable to open save file", e.what()));
+			}
+			delete saveDataOpen;
 		}
 
 		if(saveURIOpen)
@@ -1674,29 +1656,6 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 				// if stkm2 is out, you must be holding right ctrl, else just either ctrl
 				if ((globalSim->elementCount[PT_STKM2]>0 && (sdl_mod&KMOD_RCTRL)) || (globalSim->elementCount[PT_STKM2]<=0 && (sdl_mod&(KMOD_CTRL|KMOD_META))))
 					tab_save(tab_num, 1);
-			}
-			if (sdl_key=='r') 
-			{
-				if (the_game->GetStampState() != PowderToy::LOAD)
-				{
-					if (sdl_mod & (KMOD_CTRL|KMOD_META))
-					{
-						Snapshot::TakeSnapshot(globalSim);
-						Json::Value tempStampInfo;
-						parse_save(svf_last, svf_lsize, 1, 0, 0, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, pmap, &tempStampInfo);
-						MergeStampAuthorInfo(tempStampInfo);
-					}
-					else if (!(sdl_mod & (KMOD_CTRL|KMOD_META|KMOD_SHIFT)))
-						((LIFE_ElementDataContainer*)globalSim->elementData[PT_LIFE])->golGeneration = 0;
-				}
-			}
-			else if (sdl_key == SDLK_F5)
-			{
-				if (the_game->GetStampState() != PowderToy::LOAD)
-				{
-					Snapshot::TakeSnapshot(globalSim);
-					parse_save(svf_last, svf_lsize, 1, 0, 0, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, pmap, &authors);
-				}
 			}
 			if (sdl_key=='o')
 			{

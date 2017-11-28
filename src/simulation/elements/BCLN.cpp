@@ -14,6 +14,7 @@
  */
 
 #include "simulation/ElementsCommon.h"
+#include "simulation/GolNumbers.h"
 
 #define ADVECTION 0.1f
 

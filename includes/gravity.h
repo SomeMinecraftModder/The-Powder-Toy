@@ -39,6 +39,10 @@ extern float *th_gravp;
 void gravity_init();
 void gravity_cleanup();
 void gravity_update_async();
+#ifdef GRAVFFT
+void grav_fft_init();
+extern int grav_fft_status;
+#endif
 
 void start_grav_async();
 void stop_grav_async();

@@ -23,6 +23,7 @@
 #include "game/Authors.h"
 #include "game/Brush.h"
 #include "game/Menus.h"
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "game/ToolTip.h"
 #include "gui/game/PowderToy.h"
@@ -1108,7 +1109,7 @@ int simulation_saveStamp(lua_State* l)
 int simulation_loadStamp(lua_State* l)
 {
 	int stamp_size = 0, i = -1;
-	void *load_data = NULL;
+	char *load_data = NULL;
 	int x = luaL_optint(l,2,0);
 	int y = luaL_optint(l,3,0);
 	int includePressure = luaL_optint(l,4,1);
@@ -1123,7 +1124,7 @@ int simulation_loadStamp(lua_State* l)
 				break;
 			}
 		if (!load_data)
-			load_data = file_load(filename, &stamp_size);
+			load_data = (char*)file_load(filename, &stamp_size);
 	}
 	if (!load_data && lua_isnumber(l, 1))
 	{
@@ -1132,25 +1133,33 @@ int simulation_loadStamp(lua_State* l)
 			return luaL_error(l, "Invalid stamp ID: %d", i);
 		load_data = stamp_load(i, &stamp_size, 0);
 	}
+	if (!load_data)
+	{
+		lua_pushnil(l);
+		return 1;
+	}
 
 	int oldPause = sys_pause;
-	Json::Value luaStampAuthors;
-	if (!parse_save(load_data, stamp_size, 0, x, y, bmap, luaSim->air->vx, luaSim->air->vy, luaSim->air->pv, luaSim->air->fvx, luaSim->air->fvy, signs, parts, pmap, &luaStampAuthors, includePressure))
+	Save *save = new Save(load_data, stamp_size);
+	try
 	{
-		lua_pushinteger(l, 1);
-		
-		if (luaStampAuthors.size())
+		luaSim->LoadSave(x, y, save, 0, includePressure);
+		if (save->authors.size())
 		{
-			luaStampAuthors["type"] = "luastamp";
-			MergeStampAuthorInfo(luaStampAuthors);
+			save->authors["type"] = "luastamp";
+			MergeStampAuthorInfo(save->authors);
 		}
+		lua_pushinteger(l, 1);
 	}
-	else
+	catch (ParseException e)
+	{
 		lua_pushnil(l);
+	}
+	delete save;
 
-	sys_pause = oldPause; //tpt++ doesn't change pause state with this function, so we won't here either
-	if (load_data)
-		free(load_data);
+	// tpt++ doesn't change pause state with this function, so we won't here either
+	sys_pause = oldPause;
+	free(load_data);
 	return 1;
 }
 
@@ -1206,10 +1215,7 @@ int simulation_loadSave(lua_State * l)
 
 int simulation_reloadSave(lua_State * l)
 {
-	Snapshot::TakeSnapshot(luaSim);
-	parse_save(svf_last, svf_lsize, 1, 0, 0, bmap, luaSim->air->vx, luaSim->air->vy, luaSim->air->pv, luaSim->air->fvx, luaSim->air->fvy, signs, parts, pmap, &authors);
-	if (!authors.size())
-		DefaultSaveInfo();
+	the_game->ReloadSave();
 	return 0;
 }
 

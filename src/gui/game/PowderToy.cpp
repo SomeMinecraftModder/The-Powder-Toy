@@ -39,12 +39,15 @@
 #include "gui/profile/ProfileViewer.h"
 #include "gui/sign/CreateSign.h"
 #include "gui/rendermodes/RenderModesUI.h"
+#include "simulation/elements/LIFE.h"
 
 PowderToy::~PowderToy()
 {
 	Snapshot::ClearSnapshots();
 	main_end_hack();
 	free(clipboardData);
+	if (reloadSave)
+		delete reloadSave;
 }
 
 PowderToy::PowderToy():
@@ -81,6 +84,7 @@ PowderToy::PowderToy():
 	zoomMousePosition(Point(0, 0)),
 	zoomSize(32),
 	zoomFactor(8),
+	reloadSave(NULL),
 	state(NONE),
 	loadPos(Point(0, 0)),
 	loadSize(Point(0, 0)),
@@ -161,7 +165,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->OpenBrowser(b);
+			dynamic_cast<PowderToy*>(button->GetParent())->OpenBrowserBtn(b);
 		}
 	};
 #ifdef TOUCHUI
@@ -181,7 +185,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->ReloadSave(b);
+			dynamic_cast<PowderToy*>(button->GetParent())->ReloadSaveBtn(b);
 		}
 	};
 	reloadButton = new Button(openBrowserButton->Right(Point(1, 0)), Point(minWidth > 17 ? minWidth : 17, ySize), "\x91");
@@ -198,7 +202,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->DoSave(b);
+			dynamic_cast<PowderToy*>(button->GetParent())->DoSaveBtn(b);
 		}
 	};
 	saveButton = new Button(reloadButton->Right(Point(1, 0)), Point(minWidth > 151 ? minWidth : 151, ySize), "\x82 [untitled simulation]");
@@ -222,7 +226,7 @@ PowderToy::PowderToy():
 
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->DoVote(voteType);
+			dynamic_cast<PowderToy*>(button->GetParent())->DoVoteBtn(voteType);
 		}
 	};
 #ifdef TOUCHUI
@@ -248,7 +252,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->TogglePause();
+			dynamic_cast<PowderToy*>(button->GetParent())->TogglePauseBtn();
 		}
 	};
 	Point size = Point(minWidth > 15 ? minWidth : 15, ySize);
@@ -262,7 +266,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->RenderOptions();
+			dynamic_cast<PowderToy*>(button->GetParent())->RenderOptionsBtn();
 		}
 	};
 	size = Point(minWidth > 17 ? minWidth : 17, ySize);
@@ -276,7 +280,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->LoginButton();
+			dynamic_cast<PowderToy*>(button->GetParent())->LoginBtn();
 		}
 	};
 	size = Point(minWidth > 95 ? minWidth : 95, ySize);
@@ -305,7 +309,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->OpenOptions();
+			dynamic_cast<PowderToy*>(button->GetParent())->OpenOptionsBtn();
 		}
 	};
 	size = Point(minWidth > 15 ? minWidth : 15, ySize);
@@ -319,7 +323,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->ReportBug();
+			dynamic_cast<PowderToy*>(button->GetParent())->ReportBugBtn();
 		}
 	};
 	size = Point(minWidth > 15 ? minWidth : 15, ySize);
@@ -333,7 +337,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->OpenTags();
+			dynamic_cast<PowderToy*>(button->GetParent())->OpenTagsBtn();
 		}
 	};
 	Point tagsPos = downvoteButton->Right(Point(1, 0));
@@ -353,7 +357,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->ToggleErase(b == 4);
+			dynamic_cast<PowderToy*>(button->GetParent())->ToggleEraseBtn(b == 4);
 		}
 	};
 	eraseButton = new Button(Point(XRES+1, 0), Point(BARSIZE-1, 25), "\xE8");
@@ -367,7 +371,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->OpenConsole(b == 4);
+			dynamic_cast<PowderToy*>(button->GetParent())->OpenConsoleBtn(b == 4);
 		}
 	};
 	openConsoleButton = new Button(eraseButton->Below(Point(0, 1)), Point(BARSIZE-1, 25), "\xE9");
@@ -381,7 +385,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->ToggleSetting(b == 4);
+			dynamic_cast<PowderToy*>(button->GetParent())->ToggleSettingBtn(b == 4);
 		}
 	};
 	settingsButton = new Button(openConsoleButton->Below(Point(0, 1)), Point(BARSIZE-1, 25), "\xEB");
@@ -395,7 +399,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->StartZoom(b == 4);
+			dynamic_cast<PowderToy*>(button->GetParent())->StartZoomBtn(b == 4);
 		}
 	};
 	zoomButton = new Button(settingsButton->Below(Point(0, 1)), Point(BARSIZE-1, 25), "\xEC");
@@ -409,7 +413,7 @@ PowderToy::PowderToy():
 	public:
 		virtual void ButtionActionCallback(Button *button, unsigned char b)
 		{
-			dynamic_cast<PowderToy*>(button->GetParent())->SaveStamp(b == 4);
+			dynamic_cast<PowderToy*>(button->GetParent())->SaveStampBtn(b == 4);
 		}
 	};
 	stampButton = new Button(zoomButton->Below(Point(0, 1)), Point(BARSIZE-1, 25), "\xEA");
@@ -480,7 +484,7 @@ void PowderToy::DelayedHttpInitialization()
 #endif
 }
 
-void PowderToy::OpenBrowser(unsigned char b)
+void PowderToy::OpenBrowserBtn(unsigned char b)
 {
 	if (voteDownload)
 	{
@@ -499,20 +503,15 @@ void PowderToy::OpenBrowser(unsigned char b)
 		search_ui(vid_buf);
 }
 
-void PowderToy::ReloadSave(unsigned char b)
+void PowderToy::ReloadSaveBtn(unsigned char b)
 {
 	if (b == 1 || !strncmp(svf_id, "", 8))
-	{
-		Snapshot::TakeSnapshot(sim);
-		parse_save(svf_last, svf_lsize, 1, 0, 0, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, pmap, &authors);
-		if (!authors.size())
-			DefaultSaveInfo();
-	}
+		ReloadSave();
 	else
 		open_ui(vid_buf, svf_id, NULL, 0);
 }
 
-void PowderToy::DoSave(unsigned char b)
+void PowderToy::DoSaveBtn(unsigned char b)
 {
 #ifdef TOUCHUI
 	if (!svf_login || (sdl_mod & (KMOD_CTRL|KMOD_META)) || b != 1)
@@ -544,6 +543,7 @@ void PowderToy::DoSave(unsigned char b)
 				else
 					SetInfoTip("Updated successfully");
 			}
+			free(saveData);
 		}
 		// local save
 		else
@@ -581,7 +581,7 @@ void PowderToy::DoSave(unsigned char b)
 	}
 }
 
-void PowderToy::DoVote(bool up)
+void PowderToy::DoVoteBtn(bool up)
 {
 	if (voteDownload != NULL)
 	{
@@ -598,23 +598,23 @@ void PowderToy::DoVote(bool up)
 	svf_myvote = up ? 1 : -1; // will be reset later upon error
 }
 
-void PowderToy::OpenTags()
+void PowderToy::OpenTagsBtn()
 {
 	tag_list_ui(vid_buf);
 }
 
-void PowderToy::ReportBug()
+void PowderToy::ReportBugBtn()
 {
 	report_ui(vid_buf, NULL, true);
 }
 
-void PowderToy::OpenOptions()
+void PowderToy::OpenOptionsBtn()
 {
 	simulation_ui(vid_buf);
 	save_presets();
 }
 
-void PowderToy::LoginButton()
+void PowderToy::LoginBtn()
 {
 	if (svf_login && mouse.X <= loginButton->GetPosition().X+18)
 	{
@@ -637,7 +637,7 @@ void PowderToy::LoginButton()
 	}
 }
 
-void PowderToy::RenderOptions()
+void PowderToy::RenderOptionsBtn()
 {
 	RenderModesUI *renderModes = new RenderModesUI();
 	this->AddSubwindow(renderModes);
@@ -647,6 +647,16 @@ void PowderToy::RenderOptions()
 	insideRenderOptions = true;
 	deletingRenderOptions = false;
 	restorePreviousPause = true;
+}
+
+void PowderToy::TogglePauseBtn()
+{
+	TogglePause();
+}
+
+void PowderToy::SetPauseBtn(bool pause)
+{
+	SetPause(pause);
 }
 
 void PowderToy::TogglePause()
@@ -674,7 +684,7 @@ void PowderToy::SetPause(bool pause)
 
 // functions called by touch interface buttons are here
 #ifdef TOUCHUI
-void PowderToy::ToggleErase(bool alt)
+void PowderToy::ToggleEraseBtn(bool alt)
 {
 	if (alt)
 	{
@@ -699,7 +709,7 @@ void PowderToy::ToggleErase(bool alt)
 	}
 }
 
-void PowderToy::OpenConsole(bool alt)
+void PowderToy::OpenConsoleBtn(bool alt)
 {
 	if (alt)
 		Platform::ShowOnScreenKeyboard("", false);
@@ -707,7 +717,7 @@ void PowderToy::OpenConsole(bool alt)
 		console_mode = 1;
 }
 
-void PowderToy::ToggleSetting(bool alt)
+void PowderToy::ToggleSettingBtn(bool alt)
 {
 	if (alt)
 		simulation_ui(vid_buf);
@@ -737,7 +747,7 @@ void PowderToy::ToggleSetting(bool alt)
 	}
 }
 
-void PowderToy::StartZoom(bool alt)
+void PowderToy::StartZoomBtn(bool alt)
 {
 	if (ZoomWindowShown() || placingZoomTouch)
 		HideZoomWindow();
@@ -748,7 +758,7 @@ void PowderToy::StartZoom(bool alt)
 	}
 }
 
-void PowderToy::SaveStamp(bool alt)
+void PowderToy::SaveStampBtn(bool alt)
 {
 	if (alt)
 	{
@@ -970,6 +980,30 @@ void PowderToy::UpdateZoomCoordinates(Point mouse)
 		zoomWindowPosition = Point(XRES-zoomSize*zoomFactor, 1);
 	else
 		zoomWindowPosition = Point(1, 1);
+}
+
+void PowderToy::ReloadSave()
+{
+	Snapshot::TakeSnapshot(sim);
+	try
+	{
+		sim->LoadSave(0, 0, reloadSave, 1);
+		authors = reloadSave->authors;
+		if (!authors.size())
+			DefaultSaveInfo();
+	}
+	catch (ParseException e)
+	{
+		Engine::Ref().ShowWindow(new InfoPrompt("Error reloading save", e.what()));
+	}
+}
+
+void PowderToy::SetReloadPoint(Save * reloadSave)
+{
+	if (this->reloadSave)
+		delete this->reloadSave;
+	if (reloadSave)
+		this->reloadSave = new Save(*reloadSave);
 }
 
 void PowderToy::UpdateStampCoordinates(Point cursor, Point offset)
@@ -1320,7 +1354,7 @@ void PowderToy::OnTick(uint32_t ticks)
 
 	// a ton of stuff with the buttons on the bottom row has to be updated
 	// later, this will only be done when an event happens
-	reloadButton->SetEnabled(svf_last ? true : false);
+	reloadButton->SetEnabled(reloadSave != NULL ? true : false);
 #ifdef TOUCHUI
 	openBrowserButton->SetState(ctrlHeld ? Button::INVERTED : Button::HOLD);
 	saveButton->SetState((svf_login && ctrlHeld) ? Button::INVERTED : Button::HOLD);
@@ -1796,11 +1830,10 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 		//Json::Value tempStampInfo;
 		//if (!parse_save(stampData, stampSize, 0, loadPos.X, loadPos.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, pmap, &tempStampInfo, !shiftHeld))
 		//	MergeStampAuthorInfo(tempStampInfo);
-		
-		Save *save = new Save();
+
+		Save *save = new Save(stampData, stampSize);
 		try
 		{
-			save->ParseSave(stampData, stampSize);
 			sim->LoadSave(loadPos.X, loadPos.Y, save, 0, !shiftHeld);
 			MergeStampAuthorInfo(save->authors);
 		}
@@ -1808,6 +1841,7 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 		{
 			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
 		}
+		delete save;
 
 		ResetStampState();
 		return;
@@ -1848,7 +1882,7 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 				clipboardInfo["username"] = svf_user;
 				clipboardInfo["date"] = (Json::Value::UInt64)time(NULL);
 				SaveAuthorInfo(&clipboardInfo);
-				clipboardData = build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
+				clipboardData = (char*)build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
 				break;
 			}
 			case CUT:
@@ -1859,7 +1893,7 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 				clipboardInfo["username"] = svf_user;
 				clipboardInfo["date"] = (Json::Value::UInt64)time(NULL);
 				SaveAuthorInfo(&clipboardInfo);
-				clipboardData = build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
+				clipboardData = (char*)build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
 				if (clipboardData)
 					clear_area(savePos.X, savePos.Y, saveSize.X, saveSize.Y);
 				break;
@@ -2075,7 +2109,7 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 
 		if (doTransform)
 		{
-			void *newData = transform_save(stampData, &stampSize, transform, translate);
+			char *newData = (char*)transform_save(stampData, &stampSize, transform, translate);
 			if (!newData)
 				return;
 			free(stampData);
@@ -2121,6 +2155,14 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 		Engine::Ref().ShowWindow(confirm);
 		break;
 	}
+	case 'r':
+		if (state != LOAD)
+		{
+			if (ctrlHeld)
+				ReloadSave();
+			else if (!shiftHeld)
+				((LIFE_ElementDataContainer*)sim->elementData[PT_LIFE])->golGeneration = 0;
+		}
 	case 'y':
 		// ctrl + y
 		if (ctrlHeld)
@@ -2254,7 +2296,7 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 		if (ctrlHeld && clipboardData)
 		{
 			ResetStampState();
-			stampData = malloc(clipboardSize);
+			stampData = (char*)malloc(clipboardSize);
 			if (stampData)
 			{
 				memcpy(stampData, clipboardData, clipboardSize);
@@ -2384,6 +2426,10 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 			Renderer::Ref().ToggleDisplayMode(DISPLAY_AIRC);
 		else
 			LoadRenderPreset(CM_CRACK);
+		break;
+	case SDLK_F5:
+		if (state != LOAD)
+			ReloadSave();
 		break;
 	}
 }

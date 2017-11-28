@@ -25,6 +25,7 @@
 #include "powder.h"
 #include "save.h"
 #include "gravity.h"
+#include "graphics.h"
 #include "BSON.h"
 #include "hmap.h"
 #include "interface.h"
@@ -1894,10 +1895,6 @@ int parse_save_OPS(void *save, int size, int replace, int x0, int y0, unsigned c
 				}
 				svf_own = svf_login && !strcmp(svf_author, svf_user);
 				svf_publish = svf_publish && svf_login && !strcmp(svf_author, svf_user);
-				if (svf_last)
-					free(svf_last);
-				svf_last = save;
-				svf_lsize = size;
 			}
 			else
 			{

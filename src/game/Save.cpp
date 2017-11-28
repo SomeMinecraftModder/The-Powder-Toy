@@ -18,17 +18,116 @@
 #include <memory>
 #include "Save.h"
 #include "BSON.h"
+#include "defines.h"
 #include "hmap.h" // for firw_data
 #include "misc.h" // For restrict_flt
 #include "common/Format.h"
 #include "simulation/ElementNumbers.h"
+#include "simulation/GolNumbers.h"
 #include "simulation/SimulationData.h"
+#include "simulation/ToolNumbers.h"
 #include "simulation/WallNumbers.h"
 
-Save::Save()
+Save::Save(char * saveData, int saveSize)
 {
+	this->saveData = new unsigned char[saveSize];
+	std::copy(&saveData[0], &saveData[saveSize], &this->saveData[0]);
+	this->saveSize = saveSize;
+	expanded = false;
 	InitData();
 	InitVars();
+}
+
+Save::Save(const Save & save):
+	expanded(save.expanded),
+	hasPressure(save.hasPressure),
+	hasAmbientHeat(save.hasAmbientHeat),
+	signs(save.signs),
+	luaCode(save.luaCode),
+	logMessages(save.logMessages),
+	adminLogMessages(save.adminLogMessages),
+	createdVersion(save.createdVersion),
+	modCreatedVersion(save.modCreatedVersion),
+	androidCreatedVersion(save.androidCreatedVersion),
+	leftSelectedIdentifier(save.leftSelectedIdentifier),
+	rightSelectedIdentifier(save.rightSelectedIdentifier),
+	saveInfo(save.saveInfo),
+	saveInfoPresent(save.saveInfoPresent),
+
+	legacyEnable(save.legacyEnable),
+	gravityEnable(save.gravityEnable),
+	aheatEnable(save.aheatEnable),
+	waterEEnabled(save.waterEEnabled),
+	paused(save.paused),
+	gravityMode(save.gravityMode),
+	airMode(save.airMode),
+	edgeMode(save.edgeMode),
+	hudEnable(save.hudEnable),
+	hudEnablePresent(save.hudEnablePresent),
+	msRotation(save.msRotation),
+	msRotationPresent(save.msRotationPresent),
+	activeMenu(save.activeMenu),
+	activeMenuPresent(save.activeMenuPresent),
+	decorationsEnable(save.decorationsEnable),
+	decorationsEnablePresent(save.decorationsEnablePresent),
+	legacyHeatSave(save.legacyHeatSave),
+	palette(save.palette),
+	renderModes(save.renderModes),
+	renderModesPresent(save.renderModesPresent),
+	displayModes(save.displayModes),
+	displayModesPresent(save.displayModesPresent),
+	colorMode(save.colorMode),
+	colorModePresent(save.colorModePresent),
+	MOVSdata(save.MOVSdata),
+	ANIMdata(save.ANIMdata)
+{
+	InitData();
+	if (save.expanded)
+	{
+		SetSize(save.blockWidth, save.blockHeight);
+
+		std::copy(save.particles, save.particles+NPART, particles);
+		for (unsigned int j = 0; j < blockHeight; j++)
+		{
+			std::copy(save.blockMap[j], save.blockMap[j]+blockWidth, blockMap[j]);
+			std::copy(save.fanVelX[j], save.fanVelX[j]+blockWidth, fanVelX[j]);
+			std::copy(save.fanVelY[j], save.fanVelY[j]+blockWidth, fanVelY[j]);
+			std::copy(save.pressure[j], save.pressure[j]+blockWidth, pressure[j]);
+			std::copy(save.velocityX[j], save.velocityX[j]+blockWidth, velocityX[j]);
+			std::copy(save.velocityY[j], save.velocityY[j]+blockWidth, velocityY[j]);
+			std::copy(save.ambientHeat[j], save.ambientHeat[j]+blockWidth, ambientHeat[j]);
+		}
+	}
+	else
+	{
+		blockWidth = save.blockWidth;
+		blockHeight = save.blockHeight;
+	}
+	particlesCount = save.particlesCount;
+	authors = save.authors;
+	saveData = NULL;
+}
+
+Save::~Save()
+{
+	delete[] saveData;
+	Dealloc();
+}
+
+void Save::Dealloc()
+{
+	if (particles)
+	{
+		delete[] particles;
+		particles = NULL;
+	}
+	Deallocate2DArray<unsigned char>(&blockMap, blockHeight);
+	Deallocate2DArray<float>(&fanVelX, blockHeight);
+	Deallocate2DArray<float>(&fanVelY, blockHeight);
+	Deallocate2DArray<float>(&pressure, blockHeight);
+	Deallocate2DArray<float>(&velocityX, blockHeight);
+	Deallocate2DArray<float>(&velocityY, blockHeight);
+	Deallocate2DArray<float>(&ambientHeat, blockHeight);
 }
 
 void Save::InitData()
@@ -90,6 +189,7 @@ void Save::InitVars()
 	activeMenuPresent = false;
 	decorationsEnable = true;
 	decorationsEnablePresent = false;
+	legacyHeatSave = false;
 	//translated.x = translated.y = 0;
 
 	saveInfoPresent = false;
@@ -233,9 +333,29 @@ int Save::ChangeWallpp(int wt)
 	return wt;
 }
 
-void Save::ParseSave(void *save, int size)
+void Save::ParseSave()
 {
-	ParseSaveOPS(save, size);
+	if (expanded)
+		return;
+
+	if (saveSize < 12)
+		throw ParseException("Save too small");
+
+	if ((saveData[0] == 0x66 && saveData[1] == 0x75 && saveData[2] == 0x43) || (saveData[0] == 0x50 && saveData[1] == 0x53 && saveData[2] == 0x76))
+	{
+		ParseSavePSv();
+	}
+	else if (saveData[0] == 'O' && saveData[1] == 'P' && saveData[2] == 'S')
+	{
+		if (saveData[3] != '1')
+			throw ParseException("Save format from newer version");
+		ParseSaveOPS();
+	}
+	else
+	{
+		throw ParseException("Invalid save format");
+	}
+	expanded = true;
 }
 
 void Save::CheckBsonFieldUser(bson_iterator iter, const char *field, unsigned char **data, unsigned int *fieldLen)
@@ -287,18 +407,18 @@ bool Save::CheckBsonFieldInt(bson_iterator iter, const char *field, int *setting
 	return false;
 }
 
-void Save::ParseSaveOPS(void *save, int size)
+void Save::ParseSaveOPS()
 {
-	unsigned char *inputData = (unsigned char*)save, *bsonData = NULL, *partsData = NULL, *partsPosData = NULL, *fanData = NULL, *wallData = NULL, *soapLinkData = NULL;
+	unsigned char *bsonData = NULL, *partsData = NULL, *partsPosData = NULL, *fanData = NULL, *wallData = NULL, *soapLinkData = NULL;
 	unsigned char *pressData = NULL, *vxData = NULL, *vyData = NULL, *ambientData = NULL;
-	unsigned int inputDataLen = size, bsonDataLen = 0, partsDataLen, partsPosDataLen, fanDataLen, wallDataLen, soapLinkDataLen;
+	unsigned int bsonDataLen = 0, partsDataLen, partsPosDataLen, fanDataLen, wallDataLen, soapLinkDataLen;
 	unsigned int pressDataLen, vxDataLen, vyDataLen, ambientDataLen = 0;
 #ifndef NOMOD
 	unsigned char *movsData = NULL, *animData = NULL;
 	unsigned int movsDataLen, animDataLen;
 #endif
 	unsigned int blockX, blockY, blockW, blockH, fullX, fullY, fullW, fullH;
-	createdVersion = inputData[4];
+	createdVersion = saveData[4];
 
 	bson b;
 	b.data = NULL;
@@ -310,8 +430,8 @@ void Save::ParseSaveOPS(void *save, int size)
 	// Block sizes
 	blockX = 0;
 	blockY = 0;
-	blockW = inputData[6];
-	blockH = inputData[7];
+	blockW = saveData[6];
+	blockH = saveData[7];
 
 	// Full size, normalized
 	fullX = blockX*CELL;
@@ -320,7 +440,7 @@ void Save::ParseSaveOPS(void *save, int size)
 	fullH = blockH*CELL;
 
 	// Incompatible cell size
-	if (inputData[5] != CELL)
+	if (saveData[5] != CELL)
 	{
 		throw ParseException("Incorrect CELL size");
 	}
@@ -333,11 +453,11 @@ void Save::ParseSaveOPS(void *save, int size)
 
 	SetSize(blockW, blockH);
 
-	bsonDataLen = ((unsigned)inputData[8]);
-	bsonDataLen |= ((unsigned)inputData[9]) << 8;
-	bsonDataLen |= ((unsigned)inputData[10]) << 16;
-	bsonDataLen |= ((unsigned)inputData[11]) << 24;
-	
+	bsonDataLen = ((unsigned)saveData[8]);
+	bsonDataLen |= ((unsigned)saveData[9]) << 8;
+	bsonDataLen |= ((unsigned)saveData[10]) << 16;
+	bsonDataLen |= ((unsigned)saveData[11]) << 24;
+
 	// Check for overflows, don't load saves larger than 200MB
 	unsigned int toAlloc = bsonDataLen + 1;
 	if (toAlloc > 209715200 || !toAlloc)
@@ -354,7 +474,7 @@ void Save::ParseSaveOPS(void *save, int size)
 	// (bson_iterator_key returns a pointer into bsonData, which is then used with strcmp)
 	bsonData[bsonDataLen] = 0;
 
-	if (BZ2_bzBuffToBuffDecompress((char*)bsonData, (unsigned*)(&bsonDataLen), (char*)inputData+12, inputDataLen-12, 0, 0))
+	if (BZ2_bzBuffToBuffDecompress((char*)bsonData, (unsigned*)(&bsonDataLen), (char*)saveData+12, saveSize-12, 0, 0) || !bsonData[0])
 	{
 		throw ParseException("Unable to decompress");
 	}
@@ -1093,6 +1213,610 @@ void Save::ParseSaveOPS(void *save, int size)
 
 	if (modCreatedVersion && !androidCreatedVersion)
 		adminLogMessages.push_back("Made in jacob1's mod version " + Format::NumberToString<int>(modCreatedVersion));
+}
+
+void Save::ParseSavePSv()
+{
+	int pos = 0;
+	bool new_format = false, legacy_beta = false;
+
+	//New file header uses PSv, replacing fuC. This is to detect if the client uses a new save format for temperatures
+	//This creates a problem for old clients, that display and "corrupt" error instead of a "newer version" error
+
+	if (saveSize < 16)
+		throw ParseException("No save data");
+	if (!(saveData[2] == 0x43 && saveData[1] == 0x75 && saveData[0] == 0x66) && !(saveData[2] == 0x76 && saveData[1] == 0x53 && saveData[0] == 0x50))
+		throw ParseException("Unknown format");
+	if (saveData[2] == 0x76 && saveData[1] == 0x53 && saveData[0] == 0x50)
+		new_format = true;
+	int ver = saveData[4];
+	if ((ver > SAVE_VERSION && ver < 200) || (ver < 237 && ver > 200+MOD_SAVE_VERSION))
+		throw ParseException("Save from a newer version");
+	if (ver == 240)
+	{
+		ver = 65;
+		modCreatedVersion = 3;
+	}
+	else if (ver == 242)
+	{
+		ver = 66;
+		modCreatedVersion = 5;
+	}
+	else if (ver == 243)
+	{
+		ver = 68;
+		modCreatedVersion = 6;
+	}
+	else if (ver == 244)
+	{
+		ver = 69;
+		modCreatedVersion = 7;
+	}
+	else if (ver >= 200) 
+	{
+		ver = 71;
+		modCreatedVersion = 8;
+	}
+
+	int bw = saveData[6];
+	int bh = saveData[7];
+	SetSize(bw, bh);
+
+	if (saveData[5] != CELL || bw > XRES/CELL || bh > YRES/CELL)
+		throw ParseException("Save too large");
+	int size = (unsigned)saveData[8];
+	size |= ((unsigned)saveData[9])<<8;
+	size |= ((unsigned)saveData[10])<<16;
+	size |= ((unsigned)saveData[11])<<24;
+	if (size > 209715200 || !size)
+		throw ParseException("Save data too large");
+
+	auto dataPtr = std::unique_ptr<unsigned char[]>(new unsigned char[size]);
+	unsigned char *data = dataPtr.get();
+	if (!data)
+		throw ParseException("Cannot allocate memory");
+
+	int bzStatus = 0;
+	if ((bzStatus = BZ2_bzBuffToBuffDecompress((char *)data, (unsigned *)&size, (char *)(saveData+12), saveSize-12, 0, 0)))
+	{
+		std::stringstream bzStatusStr;
+		bzStatusStr << bzStatus;
+		throw ParseException("Cannot decompress: " + bzStatusStr.str());
+	}
+
+	if (size < bw*bh)
+		throw ParseException("Save data corrupt (missing data)");
+
+	// normalize coordinates
+	int w  = bw *CELL;
+	int h  = bh *CELL;
+
+	auto particleIDMapPtr = std::unique_ptr<int[]>(new int[XRES*YRES]);
+	int *particleIDMap = particleIDMapPtr.get();
+	std::fill(&particleIDMap[0], &particleIDMap[XRES*YRES], 0);
+	if (!particleIDMap)
+		throw ParseException("Cannot allocate memory");
+
+	if (ver < 34)
+	{
+		legacyEnable = true;
+	}
+	else
+	{
+		if (ver >= 44)
+		{
+			legacyEnable = saveData[3] & 0x01;
+			if (!sys_pause)
+			{
+				sys_pause = (saveData[3] >> 1) & 0x01;
+			}
+			if (ver >= 46)
+			{
+				gravityMode = ((saveData[3] >> 2) & 0x03);// | ((c[3]>>2)&0x01);
+				airMode = ((saveData[3] >> 4) & 0x07);// | ((c[3]>>4)&0x02) | ((c[3]>>4)&0x01);
+			}
+			if (ver >= 49)
+			{
+				gravityEnable = ((saveData[3] >> 7) & 0x01);
+			}
+		}
+		else
+		{
+			if (saveData[3] == 1 || saveData[3] == 0)
+			{
+				legacyEnable = saveData[3];
+			}
+			else
+			{
+				legacy_beta = true;
+			}
+		}
+	}
+
+	// load the required air state
+	for (int y = 0; y < bh; y++)
+		for (int x = 0; x < bw; x++)
+		{
+			if (data[pos])
+			{
+				//In old saves, ignore walls created by sign tool bug
+				//Not ignoring other invalid walls or invalid walls in new saves, so that any other bugs causing them are easier to notice, find and fix
+				if (ver >= 44 && ver < 71 && data[pos] == OLD_WL_SIGN)
+				{
+					pos++;
+					continue;
+				}
+
+				//TODO: if wall id's are changed look at https://github.com/simtr/The-Powder-Toy/commit/02a4c17d72def847205c8c89dacabe9ecdcb0dab
+				//for now, old saves shouldn't have id's this large
+				if (ver < 44 && blockMap[y][x] >= 122)
+					blockMap[y][x] = 0;
+				blockMap[y][x] = ChangeWall(data[pos]);
+				if (ver >= 44)
+					blockMap[y][x] = ChangeWallpp(blockMap[y][x]);
+				if (blockMap[y][x] < 0 || blockMap[y][x] >= WALLCOUNT)
+					blockMap[y][x] = 0;
+			}
+
+			pos++;
+		}
+	for (int y = 0; y < bh; y++)
+		for (int x = 0; x < bw; x++)
+			if (data[y*bw+x]==4 || (ver>=44 && data[y*bw+x] == O_WL_FAN))
+			{
+				if (pos >= size)
+					throw ParseException("Ran past fanVelX data buffer");
+				fanVelX[y][x] = (data[pos++]-127.0f)/64.0f;
+			}
+	for (int y = 0; y < bh; y++)
+		for (int x = 0; x < bw; x++)
+			if (data[y*bw+x]==4 || (ver>=44 && data[y*bw+x] == O_WL_FAN))
+			{
+				if (pos >= size)
+					throw ParseException("Ran past fanVelY data buffer");
+				fanVelY[y][x] = (data[pos++]-127.0f)/64.0f;
+			}
+
+	// load the particle map
+	int particlePos = pos;
+	int currID = 0;
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++)
+		{
+			if (pos >= size)
+				throw ParseException("Ran past particle data buffer");
+			int type = data[pos++];
+			if (type >= PT_NUM)
+			{
+				type = PT_DUST;
+			}
+			if (type)
+			{
+				if (modCreatedVersion > 0 && modCreatedVersion <= 5)
+				{
+					if (type >= 136 && type <= 140)
+						type += (PT_NORMAL_NUM - 136);
+					else if (type >= 142 && type <= 146)
+						type += (PT_NORMAL_NUM - 137);
+					data[pos-1] = type;
+				}
+				if (currID >= NPART)
+				{
+					particleIDMap[x+y*w] = NPART+1;
+					continue;
+				}
+				memset(particles+currID, 0, sizeof(particle));
+				particles[currID].type = type;
+				if (type == PT_COAL)
+					particles[currID].tmp = 50;
+				if (type == PT_FUSE)
+					particles[currID].tmp = 50;
+				if (type == PT_PHOT)
+					particles[currID].ctype = 0x3fffffff;
+				if (type == PT_SOAP)
+					particles[currID].ctype = 0;
+				if (type==PT_BIZR || type==PT_BIZRG || type==PT_BIZRS)
+					particles[currID].ctype = 0x47FFFF;
+				particles[currID].x = (float)x;
+				particles[currID].y = (float)y;
+				particleIDMap[x+y*w] = currID+1;
+				particlesCount = ++currID;
+			}
+		}
+
+	// load particle properties
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			i--;
+			if (pos+1 >= size)
+				throw ParseException("Ran past velocity data buffer");
+			if (i > 0 && i < NPART)
+			{
+				particles[i].vx = (data[pos++]-127.0f)/16.0f;
+				particles[i].vy = (data[pos++]-127.0f)/16.0f;
+			}
+			else
+				pos += 2;
+		}
+	}
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 44)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past .life data buffer");
+				if (i > 0 && i <= NPART)
+				{
+					int life = (data[pos++])<<8;
+					life |= (data[pos++]);
+					particles[i-1].life = life;
+				}
+				else
+					pos+=2;
+			}
+			else
+			{
+				if (pos >= size)
+					throw ParseException("Ran past .life data buffer");
+				if (i > 0 && i <= NPART)
+					particles[i-1].life = data[pos++]*4;
+				else
+					pos++;
+			}
+		}
+	}
+	if (ver >= 44)
+	{
+		for (int j = 0; j < w*h; j++)
+		{
+			int i = particleIDMap[j];
+			if (i)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past .tmp data buffer");
+				if (i > 0 && i <= NPART)
+				{
+					int tmp = (data[pos++])<<8;
+					tmp |= (data[pos++]);
+					particles[i-1].tmp = tmp;
+					if (ver < 53 && !particles[i-1].tmp)
+						for (int q = 1; q <= NGOL; q++)
+						{
+							if (particles[i-1].type == oldgolTypes[q-1] && grule[q][9] == 2)
+								particles[i-1].tmp = grule[q][9] - 1;
+						}
+					if (ver>=51 && ver<53 && particles[i-1].type==PT_PBCN)
+					{
+						particles[i-1].tmp2 = particles[i-1].tmp;
+						particles[i-1].tmp = 0;
+					}
+				}
+				else
+					pos+=2;
+			}
+		}
+	}
+	if (ver >= 53)
+	{
+		for (int j = 0; j < w*h; j++)
+		{
+			int i = particleIDMap[j];
+			int type = data[particlePos+j];
+			if (i && (type == PT_PBCN || (type == PT_TRON && ver >= 77)))
+			{
+				if (pos >= size)
+					throw ParseException("Ran past .tmp2 data buffer");
+				if (i > 0 && i <= NPART)
+				{
+					particles[i-1].tmp2 = data[pos++];
+				}
+				else
+					pos++;
+			}
+		}
+	}
+	// Read ALPHA component
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 49)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past alpha deco data buffer");
+				if (i > 0 && i <= NPART)
+					particles[i-1].dcolour = (data[pos++]<<24);
+				else
+					pos++;
+			}
+		}
+	}
+	// Read RED component
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 49)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past red deco data buffer");
+				if (i > 0 && i <= NPART)
+					particles[i-1].dcolour |= (data[pos++]<<16);
+				else
+					pos++;
+			}
+		}
+	}
+	// Read GREEN component
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 49)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past green deco data buffer");
+				if (i > 0 && i <= NPART)
+					particles[i-1].dcolour |= (data[pos++]<<8);
+				else
+					pos++;
+			}
+		}
+	}
+	// Read BLUE component
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 49)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past blue deco data buffer");
+				if (i > 0 && i <= NPART)
+					particles[i-1].dcolour |= data[pos++];
+				else
+					pos++;
+			}
+		}
+	}
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		if (i)
+		{
+			if (ver >= 34 && !legacy_beta)
+			{
+				if (pos >= size)
+					throw ParseException("Ran past .temp data buffer");
+				if (i >= 0 && i <= NPART)
+				{
+					if (ver >= 42)
+					{
+						if (new_format)
+						{
+							int temp = (data[pos++])<<8;
+							temp |= (data[pos++]);
+							// Fix PUMP saved at 0, so that it loads at 0.
+							if (particles[i-1].type == PT_PUMP)
+								particles[i-1].temp = temp + 0.15f;
+							else
+								particles[i-1].temp = (float)temp;
+						}
+						else
+						{
+							particles[i-1].temp = (float)(data[pos++] * ((MAX_TEMP-MIN_TEMP)/255)) + MIN_TEMP;
+						}
+					}
+					else
+					{
+						particles[i-1].temp = ((data[pos++] * ((O_MAX_TEMP-O_MIN_TEMP)/255))+O_MIN_TEMP) + 273.0f;
+					}
+				}
+				else
+				{
+					pos++;
+					if (new_format)
+					{
+						pos++;
+					}
+				}
+			}
+			else
+			{
+				legacyHeatSave = true;
+			}
+		}
+	} 
+	for (int j = 0; j < w*h; j++)
+	{
+		int i = particleIDMap[j];
+		int type = data[particlePos+j];
+		if (i && (type==PT_CLNE || (type==PT_PCLN && ver>=43) || (type==PT_BCLN && ver>=44) || (type==PT_SPRK && ver>=21) || (type==PT_LAVA && ver>=34) || (type==PT_PIPE && ver>=43) || (type==PT_LIFE && ver>=51) || (type==PT_PBCN && ver>=52) || (type==PT_WIRE && ver>=55) || (type==PT_STOR && ver>=59) || (type==PT_CONV && ver>=60)))
+		{
+			if (pos >= size)
+				throw ParseException("Ran past .ctype data buffer");
+			if (i > 0 && i <= NPART)
+				particles[i-1].ctype = data[pos++];
+			else
+				pos++;
+		}
+		// no more particle properties to load, so we can change type here without messing up loading
+		if (i > 0 && i <= NPART)
+		{
+			if (ver < 48 && (type == OLD_PT_WIND || (type == PT_BRAY && particles[i-1].life == 0)))
+			{
+				// Replace invisible particles with something sensible and add decoration to hide it
+				particles[i-1].dcolour = COLARGB(255, 0, 0, 0);
+				particles[i-1].type = PT_DMND;
+			}
+			if (ver < 51 && ((type >= 78 && type <= 89) || (type >= 134 && type <= 146 && type != 141)))
+			{
+				//Replace old GOL
+				particles[i-1].type = PT_LIFE;
+				for (int gnum = 0; gnum < NGOL; gnum++)
+				{
+					if (type == oldgolTypes[gnum])
+						particles[i-1].ctype = gnum;
+				}
+				type = PT_LIFE;
+			}
+			if (ver < 52 && (type == PT_CLNE || type == PT_PCLN || type == PT_BCLN))
+			{
+				//Replace old GOL ctypes in clone
+				for (int gnum = 0; gnum<NGOL; gnum++)
+				{
+					if (particles[i-1].ctype == oldgolTypes[gnum])
+					{
+						particles[i-1].ctype = PT_LIFE;
+						particles[i-1].tmp = gnum;
+					}
+				}
+			}
+			if (type == PT_LCRY)
+			{
+				if (ver < 67)
+				{
+					//New LCRY uses TMP not life
+					if (particles[i-1].life >= 10)
+					{
+						particles[i-1].life = 10;
+						particles[i-1].tmp2 = 10;
+						particles[i-1].tmp = 3;
+					}
+					else if (particles[i-1].life <= 0)
+					{
+						particles[i-1].life = 0;
+						particles[i-1].tmp2 = 0;
+						particles[i-1].tmp = 0;
+					}
+					else if (particles[i-1].life < 10 && particles[i-1].life > 0)
+					{
+						particles[i-1].tmp = 1;
+					}
+				}
+				else
+				{
+					particles[i-1].tmp2 = particles[i-1].life;
+				}
+			}
+
+			// PSv isn't used past version 77, but check version anyway ...
+			if (ver<81)
+			{
+				if (particles[i-1].type == PT_BOMB && particles[i-1].tmp != 0)
+				{
+					particles[i-1].type = PT_EMBR;
+					particles[i-1].ctype = 0;
+					if (particles[i-1].tmp == 1)
+						particles[i-1].tmp = 0;
+				}
+				if (particles[i-1].type == PT_DUST && particles[i-1].life > 0)
+				{
+					particles[i-1].type = PT_EMBR;
+					particles[i-1].ctype = (particles[i-1].tmp2<<16) | (particles[i-1].tmp<<8) | particles[i-1].ctype;
+					particles[i-1].tmp = 1;
+				}
+				if (particles[i-1].type == PT_FIRW && particles[i-1].tmp >= 2)
+				{
+					int caddress = (int)restrict_flt(restrict_flt((float)(particles[i-1].tmp-4), 0.0f, 200.0f)*3, 0.0f, (200.0f*3)-3);
+					particles[i-1].type = PT_EMBR;
+					particles[i-1].tmp = 1;
+					particles[i-1].ctype = (((unsigned char)(firw_data[caddress]))<<16) | (((unsigned char)(firw_data[caddress+1]))<<8) | ((unsigned char)(firw_data[caddress+2]));
+				}
+			}
+			if (ver < 89)
+			{
+				if (particles[i-1].type == PT_FILT)
+				{
+					if (particles[i-1].tmp<0 || particles[i-1].tmp>3)
+						particles[i-1].tmp = 6;
+					particles[i-1].ctype = 0;
+				}
+				if (particles[i-1].type == PT_QRTZ || particles[i-1].type == PT_PQRT)
+				{
+					particles[i-1].tmp2 = particles[i-1].tmp;
+					particles[i-1].tmp = particles[i-1].ctype;
+					particles[i-1].ctype = 0;
+				}
+			}
+			if (ver < 90 && particles[i-1].type == PT_PHOT)
+			{
+				particles[i-1].flags |= FLAG_PHOTDECO;
+			}
+			if (ver < 91 && particles[i-1].type == PT_VINE)
+			{
+				particles[i-1].tmp = 1;
+			}
+			if (ver < 91 && particles[i-1].type == PT_CONV)
+			{
+				if (particles[i-1].tmp)
+				{
+					particles[i-1].ctype |= particles[i-1].tmp<<8;
+					particles[i-1].tmp = 0;
+				}
+			}
+		}
+	}
+
+	if (pos >= size)
+		throw ParseException("Ran past data buffer");
+	int signLen = data[pos++];
+	for (int i = 0; i < signLen; i++)
+	{
+		if (pos+6 > size)
+			throw ParseException("Ran past sign data buffer");
+
+		if (signs.size() >= MAXSIGNS)
+		{
+			pos += 5;
+			int size = data[pos++];
+			pos += size;
+		}
+		else
+		{
+			int x = data[pos++];
+			x |= ((unsigned)data[pos++])<<8;
+
+			int y = data[pos++];
+			y |= ((unsigned)data[pos++])<<8;
+
+			int ju = data[pos++];
+			if (ju < 0 || ju > 3)
+				ju = 1;
+
+			int textSize = data[pos++];
+			if (pos+textSize > size)
+				throw ParseException("Ran past sign data buffer");
+
+			char temp[256];
+			memcpy(temp, data+pos, textSize);
+			temp[textSize] = 0;
+			std::string text = CleanString(temp, true, true, true).substr(0, 45);
+			signs.push_back(Sign(text, x, y, (Sign::Justification)ju));
+			pos += textSize;
+		}
+	}
+
+	if (modCreatedVersion >= 3)
+	{
+		if (pos >= size)
+			throw ParseException("Ran past mod settings data buffer");
+		decorationsEnable = (data[pos++])&0x01;
+		aheatEnable = (data[pos]>>1)&0x01;
+		hudEnable = (data[pos]>>2)&0x01;
+		hudEnablePresent = true;
+		waterEEnabled = (data[pos]>>3)&0x01;
+	}
 }
 
 template <typename T>

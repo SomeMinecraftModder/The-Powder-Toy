@@ -42,8 +42,9 @@
 #define ElementNumbers_Include_Decl
 #define DEFINE_ELEMENT(name, id) void name ## _init_element(ELEMENT_INIT_FUNC_ARGS);
 #include "ElementNumbers.h"
-#include "WallNumbers.h"
+#include "GolNumbers.h"
 #include "ToolNumbers.h"
+#include "WallNumbers.h"
 
 
 Simulation *globalSim = NULL; // TODO: remove this global variable
@@ -132,6 +133,8 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 {
 	if (!save)
 		return false;
+	if (!save->expanded)
+		save->ParseSave();
 
 	// align to blockMap
 	int blockX = (loadX + CELL/2)/CELL;
@@ -208,10 +211,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 #endif
 
 	int i, r;
-	// map of actual particle IDs back to save particle IDs. Currently used to update soap links
-	//unsigned int particleIDMap[NPART];
-	//std::fill(&particleIDMap[0], &particleIDMap[NPART], NPART);
-	//list of soap particles loaded into this save
+	// Map of soap particles loaded into this save, old ID -> new ID
 	std::map<unsigned int, unsigned int> soapList;
 	for (unsigned int n = 0; n < NPART && n < save->particlesCount; n++)
 	{
@@ -267,6 +267,10 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 					tempPart.tmp2 = save->FixType(tempPart.tmp2);
 			}
 		}
+		if (save->legacyHeatSave)
+		{
+			tempPart.temp = elements[tempPart.type].DefaultProperties.temp;
+		}
 
 		//Replace existing
 		if ((r = pmap[y][x]))
@@ -298,8 +302,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 
 			elementCount[tempPart.type]++;
 		}
-		//if (i >= 0 && i < NPART)
-		//	particleIDMap[i] = n;
 
 		if (parts[i].type == PT_STKM)
 		{
@@ -512,11 +514,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				svf_own = svf_login && !strcmp(svf_author, svf_user);
 				svf_publish = svf_publish && svf_own;
 			}
-			// TODO: svf_last should be a Save object
-			/*if (svf_last)
-				free(svf_last);
-			svf_last = save;
-			svf_lsize = size;*/
 		}
 
 #ifndef RENDERER

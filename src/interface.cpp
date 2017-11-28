@@ -70,6 +70,7 @@
 #include "game/Download.h"
 #include "game/Favorite.h"
 #include "game/Menus.h"
+#include "game/Save.h"
 #include "game/Sign.h"
 #include "game/ToolTip.h"
 #include "simulation/Snapshot.h"
@@ -106,8 +107,6 @@ char svf_name[64] = "";
 char svf_description[255] = "";
 char svf_author[64] = "";
 char svf_tags[256] = "";
-void *svf_last = NULL;
-int svf_lsize;
 
 char *search_ids[GRID_X*GRID_Y];
 char *search_dates[GRID_X*GRID_Y];
@@ -4848,7 +4847,7 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 	int nyd,nyu,lv;
 	float ryf, scroll_velocity = 0.0f;
 
-	void *data = NULL;
+	char *data = NULL;
 	save_info *info = (save_info*)calloc(sizeof(save_info), 1);
 	int lasttime = TIMEOUT, saveTotal, saveDone, infoTotal, infoDone, downloadDone, downloadTotal;
 	int info_ready = 0, data_ready = 0, thumb_data_ready = 0;
@@ -5669,21 +5668,15 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 			{
 				Snapshot::TakeSnapshot(globalSim);
 				// Do Open!
-				Json::Value tempSaveInfo;
-				int status = parse_save(data, data_size, 1, 0, 0, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, pmap, &tempSaveInfo);
-				if (!status)
+				Save *save = new Save(data, data_size);
+				try
 				{
-					if(svf_last)
-						free(svf_last);
-					svf_last = data;
-					data = NULL; //so we don't free it when returning
-					svf_lsize = data_size;
+					globalSim->LoadSave(0, 0, save, 1);
 
 					svf_open = 1;
 					svf_own = svf_login && !strcmp(info->author, svf_user);
 					svf_publish = info->publish && svf_login && !strcmp(info->author, svf_user);
 
-					
 					if (!fake404save)
 						strcpy(svf_id, save_id);
 					else
@@ -5703,12 +5696,8 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 					svf_fileopen = 0;
 					retval = 1;
 
-					memset(pers_bg, 0, (XRES+BARSIZE)*YRES*PIXELSIZE);
-					memset(fire_r, 0, sizeof(fire_r));
-					memset(fire_g, 0, sizeof(fire_g));
-					memset(fire_b, 0, sizeof(fire_b));
-					
-					if (!tempSaveInfo.size())
+					authors = save->authors;
+					if (!authors.size())
 					{
 						DefaultSaveInfo();
 						authors["published"] = info->publish;
@@ -5716,14 +5705,15 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 					}
 					else
 					{
-						if (tempSaveInfo["id"] == 0 || tempSaveInfo["id"] == -1)
-							tempSaveInfo["id"] = atoi(svf_id);
-						authors = tempSaveInfo;
+						if (authors["id"] == 0 || authors["id"] == -1)
+							authors["id"] = atoi(svf_id);
 					}
 
+					the_game->SetReloadPoint(save);
+					delete save;
 					break;
 				}
-				else
+				catch (ParseException e)
 				{
 					queue_open = 0;
 
@@ -5738,11 +5728,12 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 					svf_description[0] = 0;
 					svf_author[0] = 0;
 					svf_tags[0] = 0;
-					if (svf_last)
-						free(svf_last);
-					svf_last = NULL;
-					error_ui(vid_buf, 0, "An error occurred when parsing the save");
+					the_game->SetReloadPoint(NULL);
+					error_ui(vid_buf, 0, (std::string("An error occurred when parsing the save: ") + e.what()).c_str());
+					if (instant_open)
+						break;
 				}
+				delete save;
 			}
 			else
 			{
@@ -6331,10 +6322,9 @@ int execute_save(pixel *vid_buf)
 	             svf_user_id, /*svf_pass*/NULL, svf_session_id,
 	             &status, NULL);
 
-	if (svf_last)
-		free(svf_last);
-	svf_last = uploadparts[2];
-	svf_lsize = plens[2];
+	Save *save = new Save(uploadparts[2], plens[2]);
+	the_game->SetReloadPoint(save);
+	delete save;
 
 	if (uploadparts[3])
 		free(uploadparts[3]);
@@ -7655,11 +7645,9 @@ int DoLocalSave(std::string savename, void *saveData, int saveDataSize, bool for
 		svf_fileopen = 1;
 
 		//Allow reloading
-		if (svf_last)
-			free(svf_last);
-		svf_last = malloc(saveDataSize);
-		memcpy(svf_last, saveData, saveDataSize);
-		svf_lsize = saveDataSize;
+		Save *localSave = new Save((char*)saveData, saveDataSize);
+		the_game->SetReloadPoint(localSave);
+		delete localSave;
 		return 0;
 	}
 	else
@@ -7923,17 +7911,16 @@ void catalogue_ui(pixel * vid_buf)
 				{
 					if (b)
 					{
-						int status, size;
-						void *data;
-						data = file_load(csave->filename, &size);
+						int size;
+						char *data = (char*)file_load(csave->filename, &size);
 						if (data)
 						{
 							Snapshot::TakeSnapshot(globalSim);
-							Json::Value tempLocalSaveInfo;
-							status = parse_save(data, size, 1, 0, 0, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, pmap, &tempLocalSaveInfo);
-							if (!status)
+							Save *localSave = new Save(data, size);
+							bool success = false;
+							try
 							{
-								//svf_filename[0] = 0;
+								globalSim->LoadSave(0, 0, localSave, 1);
 								strncpy(svf_filename, csave->name, 255);
 								svf_fileopen = 1;
 								svf_open = 0;
@@ -7945,17 +7932,18 @@ void catalogue_ui(pixel * vid_buf)
 								svf_description[0] = 0;
 								svf_author[0] = 0;
 								svf_tags[0] = 0;
-								if (svf_last)
-									free(svf_last);
-								svf_last = data;
-								data = NULL;
-								svf_lsize = size;
-								authors = tempLocalSaveInfo;
-								goto openfin;
-							} else {
-								error_ui(vid_buf, 0, "Save data corrupt");
-								free(data);
+								the_game->SetReloadPoint(localSave);
+								authors = localSave->authors;
+								success = true;
 							}
+							catch (ParseException e)
+							{
+								error_ui(vid_buf, 0, (std::string("Unable to load save: ") + e.what()).c_str());
+							}
+							free(data);
+							delete localSave;
+							if (success)
+								goto openfin;
 						} else {
 							error_ui(vid_buf, 0, "Unable to read save file");
 						}
