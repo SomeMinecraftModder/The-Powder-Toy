@@ -89,7 +89,7 @@ void DoRestart(bool saveTab)
 	if (saveTab)
 	{
 		sys_pause = true;
-		tab_save(tab_num, 0);
+		tab_save(tab_num);
 	}
 #ifdef ANDROID
 	SDL_ANDROID_RestartMyself("");

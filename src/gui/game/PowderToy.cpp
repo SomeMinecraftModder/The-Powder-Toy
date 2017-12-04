@@ -45,9 +45,8 @@ PowderToy::~PowderToy()
 {
 	Snapshot::ClearSnapshots();
 	main_end_hack();
-	free(clipboardData);
-	if (reloadSave)
-		delete reloadSave;
+	delete clipboardData;
+	delete reloadSave;
 }
 
 PowderToy::PowderToy():
@@ -89,7 +88,6 @@ PowderToy::PowderToy():
 	loadPos(Point(0, 0)),
 	loadSize(Point(0, 0)),
 	stampData(NULL),
-	stampSize(0),
 	stampImg(NULL),
 	waitToDraw(false),
 #ifdef TOUCHUI
@@ -102,7 +100,6 @@ PowderToy::PowderToy():
 	savePos(Point(0, 0)),
 	saveSize(Point(0, 0)),
 	clipboardData(NULL),
-	clipboardSize(0),
 	loginCheckTicks(0),
 	loginFinished(0),
 	ignoreMouseUp(false),
@@ -519,35 +516,35 @@ void PowderToy::DoSaveBtn(unsigned char b)
 	if (!svf_login || (sdl_mod & (KMOD_CTRL|KMOD_META)))
 #endif
 	{
+		Json::Value localSaveInfo;
+		localSaveInfo["type"] = "localsave";
+		localSaveInfo["username"] = svf_user;
+		localSaveInfo["title"] = svf_fileopen ? svf_filename : "unknown";
+		localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
+		SaveAuthorInfo(&localSaveInfo);
+		Save * localSave = sim->CreateSave(0, 0, XRES, YRES);
+		localSave->authors = localSaveInfo;
+
+		bool isQuickSave = mouse.X <= saveButton->GetPosition().X+18 && svf_fileopen;
 		// local quick save
-		if (mouse.X <= saveButton->GetPosition().X+18 && svf_fileopen)
+		try
 		{
-			int saveSize;
-
-			Json::Value localSaveInfo;
-			localSaveInfo["type"] = "localsave";
-			localSaveInfo["username"] = svf_user;
-			localSaveInfo["title"] = svf_filename;
-			localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-			SaveAuthorInfo(&localSaveInfo);
-
-			void *saveData = build_save(&saveSize, 0, 0, XRES, YRES, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &localSaveInfo);
-			if (!saveData)
+			if (!isQuickSave)
 			{
-				SetInfoTip("Error creating save");
+				int ret = save_filename_ui(vid_buf, localSave);
+				if (!ret)
+					authors = localSave->authors;
 			}
+			else if (DoLocalSave(svf_filename, localSave, true))
+				SetInfoTip("Error writing local save");
 			else
-			{
-				if (DoLocalSave(svf_filename, saveData, saveSize, true))
-					SetInfoTip("Error writing local save");
-				else
-					SetInfoTip("Updated successfully");
-			}
-			free(saveData);
+				SetInfoTip("Updated successfully");
 		}
-		// local save
-		else
-			save_filename_ui(vid_buf);
+		catch (BuildException e)
+		{
+			SetInfoTip("Error creating save: " + std::string(e.what()));
+		}
+		delete localSave;
 	}
 	else
 	{
@@ -984,6 +981,8 @@ void PowderToy::UpdateZoomCoordinates(Point mouse)
 
 void PowderToy::ReloadSave()
 {
+	if (!reloadSave)
+		return;
 	Snapshot::TakeSnapshot(sim);
 	try
 	{
@@ -998,12 +997,15 @@ void PowderToy::ReloadSave()
 	}
 }
 
-void PowderToy::SetReloadPoint(Save * reloadSave)
+void PowderToy::SetReloadPoint(Save * reloadSave_)
 {
-	if (this->reloadSave)
-		delete this->reloadSave;
 	if (reloadSave)
-		this->reloadSave = new Save(*reloadSave);
+	{
+		delete reloadSave;
+		reloadSave = NULL;
+	}
+	if (reloadSave_)
+		reloadSave = new Save(*reloadSave_);
 }
 
 void PowderToy::UpdateStampCoordinates(Point cursor, Point offset)
@@ -1018,7 +1020,7 @@ void PowderToy::ResetStampState()
 {
 	if (state == LOAD)
 	{
-		free(stampData);
+		delete stampData;
 		stampData = NULL;
 		free(stampImg);
 		stampImg = NULL;
@@ -1827,21 +1829,16 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 		stampMoving = false;
 #endif
 		Snapshot::TakeSnapshot(sim);
-		//Json::Value tempStampInfo;
-		//if (!parse_save(stampData, stampSize, 0, loadPos.X, loadPos.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, pmap, &tempStampInfo, !shiftHeld))
-		//	MergeStampAuthorInfo(tempStampInfo);
 
-		Save *save = new Save(stampData, stampSize);
 		try
 		{
-			sim->LoadSave(loadPos.X, loadPos.Y, save, 0, !shiftHeld);
-			MergeStampAuthorInfo(save->authors);
+			sim->LoadSave(loadPos.X, loadPos.Y, stampData, 0, !shiftHeld);
+			MergeStampAuthorInfo(stampData->authors);
 		}
 		catch (ParseException e)
 		{
 			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
 		}
-		delete save;
 
 		ResetStampState();
 		return;
@@ -1876,26 +1873,51 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 			{
 			case COPY:
 			{
-				free(clipboardData);
 				Json::Value clipboardInfo;
 				clipboardInfo["type"] = "clipboard";
 				clipboardInfo["username"] = svf_user;
 				clipboardInfo["date"] = (Json::Value::UInt64)time(NULL);
 				SaveAuthorInfo(&clipboardInfo);
-				clipboardData = (char*)build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
+
+				delete clipboardData;
+				clipboardData = NULL;
+				clipboardData = sim->CreateSave(savePos.X, savePos.Y, saveSize.X+savePos.X, saveSize.Y+savePos.Y, !shiftHeld);
+				clipboardData->authors = clipboardInfo;
+				try
+				{
+					clipboardData->BuildSave();
+				}
+				catch (BuildException e)
+				{
+					delete clipboardData;
+					clipboardData = NULL;
+					Engine::Ref().ShowWindow(new ErrorPrompt("Error building save: " + std::string(e.what())));
+				}
 				break;
 			}
 			case CUT:
 			{
-				free(clipboardData);
 				Json::Value clipboardInfo;
 				clipboardInfo["type"] = "clipboard";
 				clipboardInfo["username"] = svf_user;
 				clipboardInfo["date"] = (Json::Value::UInt64)time(NULL);
 				SaveAuthorInfo(&clipboardInfo);
-				clipboardData = (char*)build_save(&clipboardSize, savePos.X, savePos.Y, saveSize.X, saveSize.Y, bmap, sim->air->vx, sim->air->vy, sim->air->pv, sim->air->fvx, sim->air->fvy, signs, parts, &clipboardInfo, false, !shiftHeld);
-				if (clipboardData)
+
+				delete clipboardData;
+				clipboardData = NULL;
+				clipboardData = sim->CreateSave(savePos.X, savePos.Y, saveSize.X+savePos.X, saveSize.Y+savePos.Y, !shiftHeld);
+				clipboardData->authors = clipboardInfo;
+				try
+				{
+					clipboardData->BuildSave();
 					clear_area(savePos.X, savePos.Y, saveSize.X, saveSize.Y);
+				}
+				catch (BuildException e)
+				{
+					delete clipboardData;
+					clipboardData = NULL;
+					Engine::Ref().ShowWindow(new ErrorPrompt("Error building save: " + std::string(e.what())));
+				}
 				break;
 			}
 			case SAVE:
@@ -2109,13 +2131,14 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 
 		if (doTransform)
 		{
-			char *newData = (char*)transform_save(stampData, &stampSize, transform, translate);
+			int size = stampData->GetSaveSize();
+			char *newData = (char*)transform_save((char*)stampData->GetSaveData(), &size, transform, translate);
 			if (!newData)
 				return;
-			free(stampData);
-			stampData = newData;
+			delete stampData;
+			stampData = new Save(newData, size);
 			free(stampImg);
-			stampImg = prerender_save(stampData, stampSize, &loadSize.X, &loadSize.Y);
+			stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
 			return;
 		}
 	}
@@ -2232,19 +2255,19 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 			int reorder = 1;
 			int stampID = stamp_ui(vid_buf, &reorder);
 			if (stampID >= 0)
-				stampData = stamp_load(stampID, &stampSize, reorder);
+				stampData = stamp_load(stampID, reorder);
 			else
 				stampData = NULL;
 		}
 		// else, open most recent stamp
 		else
-			stampData = stamp_load(0, &stampSize, 1);
+			stampData = stamp_load(0, 1);
 
 		// if a stamp was actually loaded
 		if (stampData)
 		{
 			int width, height;
-			stampImg = prerender_save(stampData, stampSize, &width, &height);
+			stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &width, &height);
 			if (stampImg)
 			{
 				state = LOAD;
@@ -2254,7 +2277,7 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 			}
 			else
 			{
-				free(stampData);
+				delete stampData;
 				stampData = NULL;
 			}
 		}
@@ -2296,12 +2319,10 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 		if (ctrlHeld && clipboardData)
 		{
 			ResetStampState();
-			stampData = (char*)malloc(clipboardSize);
+			stampData = new Save(*clipboardData);
 			if (stampData)
 			{
-				memcpy(stampData, clipboardData, clipboardSize);
-				stampSize = clipboardSize;
-				stampImg = prerender_save(stampData, stampSize, &loadSize.X, &loadSize.Y);
+				stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
 				if (stampImg)
 				{
 					state = LOAD;
@@ -2310,7 +2331,7 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 				}
 				else
 				{
-					free(stampData);
+					delete stampData;
 					stampData = NULL;
 				}
 			}

@@ -187,8 +187,8 @@ void benchmark_run()
 
 		gravity_init();
 #ifdef GRAVFFT
-	if (!grav_fft_status)
-		grav_fft_init();
+		if (!grav_fft_status)
+			grav_fft_init();
 #endif
 		update_grav();
 		printf("Gravity - no gravmap changes: ");

@@ -125,7 +125,7 @@ void Snapshot::Restore(Simulation * sim, const Snapshot &snap)
 		parts[i].type = 0;
 	std::copy(snap.Particles.begin(), snap.Particles.end(), parts);
 	sim->parts_lastActiveIndex = NPART-1;
-	sim->RecalcFreeParticles();
+	sim->RecalcFreeParticles(false);
 	if (ngrav_enable)
 	{
 		std::copy(snap.GravVelocityX.begin(), snap.GravVelocityX.end(), gravx);

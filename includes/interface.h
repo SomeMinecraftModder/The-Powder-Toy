@@ -22,6 +22,9 @@
 #include "graphics/Pixel.h"
 #include "graphics/ARGBColour.h"
 
+class Save;
+class Tool;
+
 #define QM_TOGGLE	1
 
 struct quick_option
@@ -257,14 +260,13 @@ void tag_list_ui(pixel *vid_buf);
 
 int save_name_ui(pixel *vid_buf);
 
-int DoLocalSave(std::string savename, void *saveData, int saveDataSize, bool force = false);
-int save_filename_ui(pixel *vid_buf);
+int DoLocalSave(std::string savename, Save *save, bool force = false);
+int save_filename_ui(pixel *vid_buf, Save *save);
 
 void old_menu_v2(int active_menu, int x, int y, int b, int bq);
 void menu_ui_v2(pixel *vid_buf, int i);
 void menu_ui_v3(pixel *vid_buf, int i, int b, int bq, int mx, int my);
 
-class Tool;
 Tool* menu_draw(int mx, int my, int b, int bq, int i);
 void menu_draw_text(Tool* over, int y);
 void menu_select_element(int b, Tool* over);

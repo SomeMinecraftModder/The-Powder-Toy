@@ -540,12 +540,11 @@ char* stamp_save(int x, int y, int w, int h, bool includePressure)
 	return mystrdup(sn);
 }
 
-void tab_save(int num, char reloadButton)
+void tab_save(int num)
 {
 	FILE *f;
 	int fileSize;
 	char fileName[64];
-	void *saveData;
 
 	sprintf(fileName, "tabs" PATH_SEP "%d.stm", num);
 
@@ -557,9 +556,19 @@ void tab_save(int num, char reloadButton)
 	SaveAuthorInfo(&tabInfo);
 
 	//build the tab
-	saveData = build_save(&fileSize, 0, 0, XRES, YRES, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, &tabInfo, true);
-	if (!saveData)
+	Save *tab = globalSim->CreateSave(0, 0, XRES, YRES, true);
+	Renderer::Ref().CreateSave(tab);
+	try
+	{
+		tab->BuildSave();
+	}
+	catch (BuildException e)
+	{
+		ErrorPrompt * error = new ErrorPrompt("Could not create tab: " + std::string(e.what()));
+		Engine::Ref().ShowWindow(error);
+		delete tab;
 		return;
+	}
 
 #ifdef WIN
 	_mkdir("tabs");
@@ -571,9 +580,9 @@ void tab_save(int num, char reloadButton)
 	f = fopen(fileName, "wb");
 	if (!f)
 		return;
-	fwrite(saveData, fileSize, 1, f);
+	fwrite(tab->GetSaveData(), tab->GetSaveSize(), 1, f);
 	fclose(f);
-	free(saveData);
+	delete tab;
 
 	//set the tab's name
 	if (strlen(svf_name))
@@ -591,9 +600,8 @@ void tab_save(int num, char reloadButton)
 	tabThumbnails[num-1] = rescale_img(vid_buf, XRES+BARSIZE, YRES, &fileSize, &fileSize, 3);
 }
 
-char *stamp_load(int i, int *size, int reorder)
+Save *stamp_load(int i, int reorder)
 {
-	char *data;
 	char fn[64];
 	struct stamp tmp;
 
@@ -601,9 +609,11 @@ char *stamp_load(int i, int *size, int reorder)
 		return NULL;
 
 	sprintf(fn, "stamps" PATH_SEP "%s.stm", stamps[i].name);
-	data = (char*)file_load(fn, size);
+	int size;
+	char *data = (char*)file_load(fn, &size);
 	if (!data)
 		return NULL;
+	Save *save = new Save(data, size);
 
 	if (reorder && i>0)
 	{
@@ -614,7 +624,7 @@ char *stamp_load(int i, int *size, int reorder)
 		stamp_update();
 	}
 
-	return data;
+	return save;
 }
 
 int tab_load(int tabNum, bool del)
@@ -805,7 +815,7 @@ void ParticleDebug(int mode, int x, int y)
 	if (debug_currentParticle == 0)
 	{
 		framerender = 1;
-		globalSim->RecalcFreeParticles();
+		globalSim->RecalcFreeParticles(true);
 		globalSim->UpdateBefore();
 		framerender = 0;
 	}
@@ -1580,7 +1590,7 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 			{
 				char ptsaveOpenString[512];
 				int oldTabNum = tab_num;
-				tab_save(tab_num, 0);
+				tab_save(tab_num);
 				num_tabs++;
 				tab_num = num_tabs;
 				NewSim();
@@ -1593,7 +1603,7 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 					tab_num = oldTabNum;
 					tab_load(oldTabNum);
 				}
-				tab_save(tab_num, 1);
+				tab_save(tab_num);
 			}
 			ptsaveOpenID = 0;
 		}
@@ -1655,7 +1665,7 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 			{
 				// if stkm2 is out, you must be holding right ctrl, else just either ctrl
 				if ((globalSim->elementCount[PT_STKM2]>0 && (sdl_mod&KMOD_RCTRL)) || (globalSim->elementCount[PT_STKM2]<=0 && (sdl_mod&(KMOD_CTRL|KMOD_META))))
-					tab_save(tab_num, 1);
+					tab_save(tab_num);
 			}
 			if (sdl_key=='o')
 			{
@@ -1878,11 +1888,11 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 				{
 					if (num_tabs < 22-GetNumMenus())
 					{
-						tab_save(tab_num, 0);
+						tab_save(tab_num);
 						num_tabs++;
 						tab_num = num_tabs;
 						NewSim();
-						tab_save(tab_num, 1);
+						tab_save(tab_num);
 					}
 				}
 				else
@@ -1906,13 +1916,13 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 			{
 				if (sdl_key == SDLK_UP && (sdl_mod & KMOD_CTRL) && tab_num > 1)
 				{
-					tab_save(tab_num, 0);
+					tab_save(tab_num);
 					tab_num--;
 					tab_load(tab_num);
 				}
 				else if (sdl_key == SDLK_DOWN && (sdl_mod & KMOD_CTRL) && tab_num < num_tabs)
 				{
-					tab_save(tab_num, 0);
+					tab_save(tab_num);
 					tab_num++;
 					tab_load(tab_num);
 				}
@@ -2284,7 +2294,7 @@ int main_loop_temp(int b, int bq, int sdl_key, int sdl_rkey, unsigned short sdl_
 
 		if (autosave > 0 && frames%autosave == 0)
 		{
-			tab_save(1, 0);
+			tab_save(1);
 		}
 		if (hud_enable)
 		{

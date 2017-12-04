@@ -1108,39 +1108,44 @@ int simulation_saveStamp(lua_State* l)
 
 int simulation_loadStamp(lua_State* l)
 {
-	int stamp_size = 0, i = -1;
-	char *load_data = NULL;
-	int x = luaL_optint(l,2,0);
-	int y = luaL_optint(l,3,0);
-	int includePressure = luaL_optint(l,4,1);
+	Save *save = NULL;
+	int x = luaL_optint(l, 2, 0);
+	int y = luaL_optint(l, 3, 0);
+	int includePressure = luaL_optint(l, 4, 1);
 
-	if (lua_isstring(l, 1)) //Load from 10 char name, or full filename
+	// Load from 10 char name, or full filename
+	if (lua_isstring(l, 1))
 	{
 		const char* filename = luaL_optstring(l, 1, "");
-		for (i=0; i<stamp_count; i++)
+		for (int i = 0; i < stamp_count; i++)
 			if (!strcmp(stamps[i].name, filename))
 			{
-				load_data = stamp_load(i, &stamp_size, 0);
+				save = stamp_load(i, 0);
 				break;
 			}
-		if (!load_data)
-			load_data = (char*)file_load(filename, &stamp_size);
+		if (!save)
+		{
+			int size;
+			char *load_data = (char*)file_load(filename, &size);
+			if (load_data)
+				save = new Save(load_data, size);
+			free(load_data);
+		}
 	}
-	if (!load_data && lua_isnumber(l, 1))
+	if (!save && lua_isnumber(l, 1))
 	{
-		i = luaL_optint(l, 1, 0);
+		int i = luaL_optint(l, 1, 0);
 		if (i < 0 || i >= stamp_count)
 			return luaL_error(l, "Invalid stamp ID: %d", i);
-		load_data = stamp_load(i, &stamp_size, 0);
+		save = stamp_load(i, 0);
 	}
-	if (!load_data)
+	if (!save)
 	{
 		lua_pushnil(l);
 		return 1;
 	}
 
 	int oldPause = sys_pause;
-	Save *save = new Save(load_data, stamp_size);
 	try
 	{
 		luaSim->LoadSave(x, y, save, 0, includePressure);
@@ -1159,7 +1164,6 @@ int simulation_loadStamp(lua_State* l)
 
 	// tpt++ doesn't change pause state with this function, so we won't here either
 	sys_pause = oldPause;
-	free(load_data);
 	return 1;
 }
 

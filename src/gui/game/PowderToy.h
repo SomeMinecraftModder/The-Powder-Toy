@@ -74,8 +74,7 @@ private:
 	StampState state;
 	Point loadPos;
 	Point loadSize;
-	char *stampData;
-	int stampSize;
+	Save *stampData;
 	pixel *stampImg;
 	bool waitToDraw; // wait a frame to draw stamp after load, because it will be in the wrong spot until another mouse event comes in
 	// touch ui stuff for rotating / moving stamps
@@ -90,8 +89,7 @@ private:
 	// saving stamps
 	Point savePos;
 	Point saveSize;
-	char *clipboardData;
-	int clipboardSize;
+	Save *clipboardData;
 
 	// bottom bar buttons
 	Button *openBrowserButton;

@@ -30,27 +30,52 @@
 #include "simulation/ElementNumbers.h"
 #include "simulation/Particle.h"
 
-struct ParseException: public std::exception
+struct SaveException: public std::exception
 {
 	std::string message;
+protected:
+	SaveException(std::string message):
+		message(message)
+	{
+	}
+
 public:
-	ParseException(std::string message): message(message)
+	const char * what() const throw()
+	{
+		return message.c_str();
+	}
+	~SaveException() throw() {}
+};
+
+struct ParseException: public SaveException
+{
+public:
+	ParseException(std::string message):
+		SaveException(message)
 	{
 #ifdef DEBUG
 		std::cout << "Error parsing save: " << message << std::endl;
 #endif
 	}
+};
 
-	const char * what() const throw()
+struct BuildException: public SaveException
+{
+public:
+	BuildException(std::string message):
+		SaveException(message)
 	{
-		return message.c_str();
+#ifdef DEBUG
+		std::cout << "Error building save: " << message << std::endl;
+#endif
 	}
-	~ParseException() throw() {}
 };
 
 class Save
 {
 public:
+	// bool which tells whether all of the maps and data in this save have been set
+	// is set either when parsing a save from data, or when creating a new save in the Simulation class
 	bool expanded;
 
 	unsigned int blockWidth;
@@ -112,30 +137,47 @@ public:
 	Json::Value authors;
 
 	// Even more jacob1's mod specific things
-	std::vector<unsigned int> renderModes;
+	std::set<unsigned int> renderModes;
 	bool renderModesPresent;
-	std::vector<unsigned int> displayModes;
+	std::set<unsigned int> displayModes;
 	bool displayModesPresent;
 	unsigned int colorMode;
 	bool colorModePresent;
-	typedef std::pair<int, int> MOVSdataItem;
+	typedef std::pair<unsigned char, unsigned char> MOVSdataItem;
 	std::vector<MOVSdataItem> MOVSdata;
 	typedef std::pair<int, std::vector<ARGBColour> > ANIMdataItem;
 	std::vector<ANIMdataItem> ANIMdata;
 
-	Save(char * saveData, int saveSize);
+	Save(char * saveData, unsigned int saveSize);
+	Save(int blockW, int blockH);
 	Save(const Save & save);
 	~Save();
 
 	void ParseSave();
+	void BuildSave();
 
 	// converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up
 	// Newer saves use palette instead, this is only for old saves
 	int FixType(int type);
 
+	Save& operator <<(particle v);
+	Save& operator <<(Sign v);
+
+	unsigned char* tempGetData() { return saveData; }
+	unsigned int tempGetSize() { return saveSize; }
+
+	/** If this save is not expanded, it will parse it
+	 ** This could take a while and may throw a BuildException
+     **/
+	const unsigned char * const GetSaveData();
+	/** If this save is not expanded, it will parse it
+	 ** This could take a while and may throw a BuildException
+     **/
+	unsigned int GetSaveSize();
+
 private:
 	unsigned char *saveData;
-	int saveSize;
+	unsigned int saveSize;
 
 	Save();
 	void Dealloc();

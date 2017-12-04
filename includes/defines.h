@@ -272,8 +272,11 @@ void dump_frame(pixel *src, int w, int h, int pitch);
 void clear_sim();
 void NewSim();
 char* stamp_save(int x, int y, int w, int h, bool includePressure);
-void tab_save(int num, char reloadButton);
-char *stamp_load(int i, int *size, int reorder);
+void tab_save(int num);
+#ifdef __cplusplus
+class Save;
+Save *stamp_load(int i, int reorder);
+#endif
 int tab_load(int tabNum, bool del = false);
 void stamp_init();
 void del_stamp(int d);

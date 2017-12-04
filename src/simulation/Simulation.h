@@ -67,7 +67,7 @@ public:
 	bool part_change_type(int i, int x, int y, int t);
 	void part_change_type_force(int i, int t);
 
-	void RecalcFreeParticles();
+	void RecalcFreeParticles(bool doLifeDec);
 	void UpdateBefore();
 	void UpdateParticles(int start, int end);
 	void UpdateAfter();
@@ -75,6 +75,7 @@ public:
 	void Tick();
 	
 	bool LoadSave(int loadX, int loadY, Save *save, int replace, bool includePressure=true);
+	Save * CreateSave(int fullX, int fullY, int fullX2, int fullY2, bool includePressure=true);
 
 	void spark_all(int i, int x, int y);
 	bool spark_all_attempt(int i, int x, int y);

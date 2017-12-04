@@ -73,6 +73,7 @@ public:
 	unsigned int GetColorMode();
 
 	void LoadSave(Save *save);
+	void CreateSave(Save *save);
 };
 
 #endif // RENDERER_H

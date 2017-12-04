@@ -3404,17 +3404,17 @@ void QuickoptionsMenu(pixel *vid_buf, int b, int bq, int x, int y)
 				//start a new tab
 				else if (clickedQuickoption == num_tabs + 1)
 				{
-					tab_save(tab_num, 0);
+					tab_save(tab_num);
 					num_tabs++;
 					tab_num = num_tabs;
 					if (sdl_mod & (KMOD_CTRL|KMOD_META))
 						NewSim();
-					tab_save(tab_num, 1);
+					tab_save(tab_num);
 				}
 				//load a different tab
 				else if (tab_num != clickedQuickoption)
 				{
-					tab_save(tab_num, 0);
+					tab_save(tab_num);
 					tab_load(clickedQuickoption);
 					tab_num = clickedQuickoption;
 				}
@@ -3459,7 +3459,7 @@ void QuickoptionsMenu(pixel *vid_buf, int b, int bq, int x, int y)
 				else
 				{
 					NewSim();
-					tab_save(tab_num, 1);
+					tab_save(tab_num);
 				}
 			}
 		}
@@ -7614,8 +7614,11 @@ void free_saveslist(savelist_e *saves)
 		free(saves->image);
 }
 
-int DoLocalSave(std::string savename, void *saveData, int saveDataSize, bool force)
+int DoLocalSave(std::string savename, Save *save, bool force)
 {
+	// get saveData, may throw an exception
+	const unsigned char *saveData = save->GetSaveData();
+	unsigned int saveSize = save->GetSaveSize();
 #ifdef WIN
 	_mkdir(LOCAL_SAVE_DIR);
 #else
@@ -7638,16 +7641,14 @@ int DoLocalSave(std::string savename, void *saveData, int saveDataSize, bool for
 	FILE *f = fopen(filename.str().c_str(), "wb");
 	if (f)
 	{
-		fwrite(saveData, saveDataSize, 1, f);
+		fwrite(saveData, saveSize, 1, f);
 		fclose(f);
 
 		strncpy(svf_filename, savename.c_str(), 255);
 		svf_fileopen = 1;
 
 		//Allow reloading
-		Save *localSave = new Save((char*)saveData, saveDataSize);
-		the_game->SetReloadPoint(localSave);
-		delete localSave;
+		the_game->SetReloadPoint(save);
 		return 0;
 	}
 	else
@@ -7656,40 +7657,27 @@ int DoLocalSave(std::string savename, void *saveData, int saveDataSize, bool for
 	}
 }
 
-int save_filename_ui(pixel *vid_buf)
+int save_filename_ui(pixel *vid_buf, Save *save)
 {
+	const unsigned char *saveData = save->GetSaveData();
+	unsigned int saveSize = save->GetSaveSize();
 	int xsize = 16+(XRES/3);
 	int ysize = 64+(YRES/3);
 	float ca = 0;
 	int x0=(XRES+BARSIZE-xsize)/2,y0=(YRES+MENUSIZE-ysize)/2,b=1,bq,mx,my;
-	int imgw, imgh, save_size;
-	void *save_data;
+	int imgw, imgh;
 	char *savefname = NULL;
 	char *filename = NULL;
 	pixel *old_vid=(pixel *)calloc((XRES+BARSIZE)*(YRES+MENUSIZE), PIXELSIZE);
 	pixel *save_data_image;
-	pixel *save = NULL;//calloc((XRES/3)*(YRES/3), PIXELSIZE);
+	pixel *saveImg = NULL;//calloc((XRES/3)*(YRES/3), PIXELSIZE);
 	ui_edit ed;
+	int ret = 1;
 
-	Json::Value localSaveInfo;
-	localSaveInfo["type"] = "localsave";
-	localSaveInfo["username"] = svf_user;
-	localSaveInfo["title"] = "unknown";
-	localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-	SaveAuthorInfo(&localSaveInfo);
-
-	save_data = build_save(&save_size, 0, 0, XRES, YRES, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, &localSaveInfo);
-	if (!save_data)
-	{
-		error_ui(vid_buf, 0, "Unable to create save file");
-		free(old_vid);
-		return 1;
-	}
-
-	save_data_image = prerender_save(save_data, save_size, &imgw, &imgh);
+	save_data_image = prerender_save((void*)saveData, saveSize, &imgw, &imgh);
 	if(save_data_image!=NULL)
 	{
-		save = resample_img(save_data_image, imgw, imgh, XRES/3, YRES/3);
+		saveImg = resample_img(save_data_image, imgw, imgh, XRES/3, YRES/3);
 	}
 
 	ui_edit_init(&ed, x0+11, y0+25, xsize-20, 0);
@@ -7728,9 +7716,9 @@ int save_filename_ui(pixel *vid_buf)
 		drawrect(vid_buf, x0, y0, xsize, ysize, 192, 192, 192, 255);
 		drawtext(vid_buf, x0+8, y0+8, "Filename:", 255, 255, 255, 255);
 		drawrect(vid_buf, x0+8, y0+20, xsize-16, 16, 255, 255, 255, 180);
-		if(save!=NULL)
+		if(saveImg!=NULL)
 		{
-			draw_image(vid_buf, save, x0+8, y0+40, XRES/3, YRES/3, 255);
+			draw_image(vid_buf, saveImg, x0+8, y0+40, XRES/3, YRES/3, 255);
 		}
 		drawrect(vid_buf, x0+8, y0+40, XRES/3, YRES/3, 192, 192, 192, 255);
 		
@@ -7753,18 +7741,16 @@ int save_filename_ui(pixel *vid_buf)
 			clean_text(ed.str,256);
 			if (strlen(ed.str))
 			{
-				int ret = DoLocalSave(ed.str, save_data, save_size);
+				ret = DoLocalSave(ed.str, save);
 				if (ret == -1)
 				{
 					if (confirm_ui(vid_buf, "A save with that name already exists.", ed.str, "Overwrite"))
-						ret = DoLocalSave(ed.str, save_data, save_size, true);
+						ret = DoLocalSave(ed.str, save, true);
 				}
 				if (ret == -2)
 				{
 					error_ui(vid_buf, 0, "Unable to write to save file.");
 				}
-				if (!ret)
-					authors = localSaveInfo;
 				break;
 			}
 		}
@@ -7784,12 +7770,12 @@ int save_filename_ui(pixel *vid_buf)
 			break;
 	}
 	free(save_data_image);
-	free(save_data);
 	free(old_vid);
-	free(save);
-	if(filename) free(filename);
-	if(savefname) free(savefname);
-	return 0;
+	if (filename)
+		free(filename);
+	if (savefname)
+		free(savefname);
+	return ret;
 }
 
 void catalogue_ui(pixel * vid_buf)

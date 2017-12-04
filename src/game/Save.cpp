@@ -15,26 +15,40 @@
 
 #include <bzlib.h>
 #include <climits>
+#include <cmath>
 #include <memory>
 #include "Save.h"
 #include "BSON.h"
 #include "defines.h"
 #include "hmap.h" // for firw_data
 #include "misc.h" // For restrict_flt
+
 #include "common/Format.h"
+#include "common/Platform.h"
 #include "simulation/ElementNumbers.h"
 #include "simulation/GolNumbers.h"
 #include "simulation/SimulationData.h"
 #include "simulation/ToolNumbers.h"
 #include "simulation/WallNumbers.h"
 
-Save::Save(char * saveData, int saveSize)
+// Used for creating saves from save data. Loading stamps / online saves, for example
+Save::Save(char * saveData, unsigned int saveSize)
 {
 	this->saveData = new unsigned char[saveSize];
 	std::copy(&saveData[0], &saveData[saveSize], &this->saveData[0]);
 	this->saveSize = saveSize;
 	expanded = false;
 	InitData();
+	InitVars();
+}
+
+// Used for creating brand new saves. Simulation::CreateSave will fill in the necessary data
+Save::Save(int blockW, int blockH)
+{
+	this->saveData = NULL;
+	this->saveSize = 0;
+	expanded = false;
+	SetSize(blockW, blockH);
 	InitVars();
 }
 
@@ -128,6 +142,7 @@ void Save::Dealloc()
 	Deallocate2DArray<float>(&velocityX, blockHeight);
 	Deallocate2DArray<float>(&velocityY, blockHeight);
 	Deallocate2DArray<float>(&ambientHeat, blockHeight);
+	expanded = false;
 }
 
 void Save::InitData()
@@ -194,12 +209,26 @@ void Save::InitVars()
 
 	saveInfoPresent = false;
 
-	renderModes = std::vector<unsigned int>();
+	renderModes = std::set<unsigned int>();
 	renderModesPresent = false;
-	displayModes = std::vector<unsigned int>();
+	displayModes = std::set<unsigned int>();
 	displayModesPresent = false;
 	colorMode = 0;
 	colorModePresent = false;
+}
+
+const unsigned char * const Save::GetSaveData()
+{
+	if (expanded && !saveData)
+		BuildSave();
+	return saveData;
+}
+
+unsigned int Save::GetSaveSize()
+{
+	if (expanded && !saveData)
+		BuildSave();
+	return saveSize;
 }
 
 int Save::FixType(int type)
@@ -337,6 +366,9 @@ void Save::ParseSave()
 {
 	if (expanded)
 		return;
+
+	if (!saveData)
+		throw ParseException("Save data doesn't exist");
 
 	if (saveSize < 12)
 		throw ParseException("Save too small");
@@ -737,7 +769,7 @@ void Save::ParseSaveOPS()
 				if (bson_iterator_type(&subiter) == BSON_INT)
 				{
 					unsigned int renderMode = bson_iterator_int(&subiter);
-					renderModes.push_back(renderMode);
+					renderModes.insert(renderMode);
 				}
 			}
 			renderModesPresent = true;
@@ -751,7 +783,7 @@ void Save::ParseSaveOPS()
 				if (bson_iterator_type(&subiter) == BSON_INT)
 				{
 					unsigned int displayMode = bson_iterator_int(&subiter);
-					displayModes.push_back(displayMode);
+					displayModes.insert(displayMode);
 				}
 			}
 			displayModesPresent = true;
@@ -1146,7 +1178,7 @@ void Save::ParseSaveOPS()
 			int movsDataPos = 0;
 			for (unsigned int i = 0; i < movsDataLen/2; i++)
 			{
-				MOVSdataItem data = std::pair<int, int>(movsData[movsDataPos], movsData[movsDataPos+1]);
+				MOVSdataItem data = MOVSdataItem(movsData[movsDataPos], movsData[movsDataPos+1]);
 				MOVSdata.push_back(data);
 				movsDataPos += 2;
 			}
@@ -1164,7 +1196,7 @@ void Save::ParseSaveOPS()
 					ANIMdataItem data;
 					int animLen = animData[animDataPos++];
 					data.first = animLen;
-					if (animDataPos+4*animLen > animDataLen)
+					if (animDataPos+4*(animLen+1) > animDataLen)
 						throw ParseException("Ran past particle data buffer while loading animation data");
 
 					for (int j = 0; j <= animLen; j++)
@@ -1819,6 +1851,606 @@ void Save::ParseSavePSv()
 	}
 }
 
+#include <iostream>
+// restrict the minimum version this save can be opened with
+#define RESTRICTVERSION(major, minor) if ((major) > minimumMajorVersion || (((major) == minimumMajorVersion && (minor) > minimumMinorVersion))) {\
+	minimumMajorVersion = major;\
+	minimumMinorVersion = minor;\
+}
+
+void Save::BuildSave()
+{
+	// minimum version this save is compatible with
+	// when building, this number may be increased depending on what elements are used
+	// or what properties are detected
+	int minimumMajorVersion = 90, minimumMinorVersion = 2;
+
+	//Original size + offset of original corner from snapped corner, rounded up by adding CELL-1
+	//int blockW = (orig_w+orig_x0-fullX+CELL-1)/CELL;
+	//int blockH = (orig_h+orig_y0-fullY+CELL-1)/CELL;
+	int fullW = blockWidth*CELL;
+	int fullH = blockHeight*CELL;
+
+	auto wallData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight]);
+	unsigned int wallDataLen = blockWidth*blockHeight;
+	bool hasWallData = false;
+	auto fanData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight*2]);
+	auto pressData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight*2]);
+	auto vxData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight*2]);
+	auto vyData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight*2]);
+	auto ambientData = std::unique_ptr<unsigned char[]>(new unsigned char[blockWidth*blockHeight*2]);
+	std::fill(&ambientData[0], &ambientData[blockWidth*blockHeight*2], 0);
+	if (!wallData || !fanData || !pressData || !vxData || !vyData || !ambientData)
+		throw BuildException("Save error, out of memory");
+
+	// Copy wall and fan data
+	unsigned int fanDataLen = 0, pressDataLen = 0, vxDataLen = 0, vyDataLen = 0, ambientDataLen = 0;
+	for (unsigned int x = 0; x < blockWidth; x++)
+	{
+		for (unsigned int y = 0; y < blockHeight; y++)
+		{
+			wallData[y*blockWidth+x] = blockMap[y][x];
+			if (blockMap[y][x])
+				hasWallData = true;
+
+			// save pressure and x/y velocity grids
+			float pres = std::max(-255.0f, std::min(255.0f, pressure[y][x])) + 256.0f;
+			float velX = std::max(-255.0f, std::min(255.0f, velocityX[y][x])) + 256.0f;
+			float velY = std::max(-255.0f, std::min(255.0f, velocityY[y][x])) + 256.0f;
+			pressData[pressDataLen++] = (unsigned char)((int)(pres*128)&0xFF);
+			pressData[pressDataLen++] = (unsigned char)((int)(pres*128)>>8);
+
+			vxData[vxDataLen++] = (unsigned char)((int)(velX*128)&0xFF);
+			vxData[vxDataLen++] = (unsigned char)((int)(velX*128)>>8);
+
+			vyData[vyDataLen++] = (unsigned char)((int)(velY*128)&0xFF);
+			vyData[vyDataLen++] = (unsigned char)((int)(velY*128)>>8);
+
+			if (hasAmbientHeat)
+			{
+				int tempTemp = (int)(ambientHeat[y][x]+0.5f);
+				ambientData[ambientDataLen++] = tempTemp;
+				ambientData[ambientDataLen++] = tempTemp >> 8;
+			}
+
+			if (blockMap[y][x] == WL_FAN)
+			{
+				int fanVX = (int)(fanVelX[y][x] * 64.0f + 127.5f);
+				if (fanVX < 0)
+					fanVX = 0;
+				else if (fanVX > 255)
+					fanVX = 255;
+				fanData[fanDataLen++] = fanVX;
+				int fanVY = (int)(fanVelY[y][x] * 64.0f + 127.5f);
+				if (fanVY < 0)
+					fanVY = 0;
+				else if (fanVY > 255)
+					fanVY = 255;
+				fanData[fanDataLen++] = fanVY;
+			}
+		}
+	}
+
+	// Index positions of all particles, using linked lists
+	// partsPosFirstMap is pmap for the first particle in each position
+	// partsPosLastMap is pmap for the last particle in each position
+	// partsPosCount is the number of particles in each position
+	// partsPosLink contains, for each particle, (i<<8)|1 of the next particle in the same position
+	auto partsPosFirstMap = std::unique_ptr<unsigned[]>(new unsigned[fullW*fullH]);
+	auto partsPosLastMap = std::unique_ptr<unsigned[]>(new unsigned[fullW*fullH]);
+	auto partsPosCount = std::unique_ptr<unsigned[]>(new unsigned[fullW*fullH]);
+	auto partsPosLink = std::unique_ptr<unsigned[]>(new unsigned[NPART]);
+	if (!partsPosFirstMap || !partsPosLastMap || !partsPosCount || !partsPosLink)
+		throw BuildException("Save error, out of memory");
+	std::fill(&partsPosFirstMap[0], &partsPosFirstMap[fullW*fullH], 0);
+	std::fill(&partsPosLastMap[0], &partsPosLastMap[fullW*fullH], 0);
+	std::fill(&partsPosCount[0], &partsPosCount[fullW*fullH], 0);
+	std::fill(&partsPosLink[0], &partsPosLink[NPART], 0);
+	unsigned int soapCount = 0;
+	for (unsigned int i = 0; i < particlesCount; i++)
+	{
+		if (particles[i].type)
+		{
+			int x = (int)(particles[i].x+0.5f);
+			int y = (int)(particles[i].y+0.5f);
+			if (!partsPosFirstMap[y*fullW + x])
+			{
+				// First entry in list
+				partsPosFirstMap[y*fullW + x] = (i<<8)|1;
+				partsPosLastMap[y*fullW + x] = (i<<8)|1;
+			}
+			else
+			{
+				// Add to end of list
+				partsPosLink[partsPosLastMap[y*fullW + x]>>8] = (i<<8)|1; // Link to current end of list
+				partsPosLastMap[y*fullW + x] = (i<<8)|1; // Set as new end of list
+			}
+			partsPosCount[y*fullW + x]++;
+		}
+	}
+
+	// Store number of particles in each position
+	auto partsPosData = std::unique_ptr<unsigned char[]>(new unsigned char[fullW*fullH*3]);
+	unsigned int partsPosDataLen = 0;
+	if (!partsPosData)
+		throw BuildException("Save error, out of memory");
+	for (int y = 0; y < fullH; y++)
+	{
+		for (int x = 0; x < fullW; x++)
+		{
+			unsigned posCount = partsPosCount[y*fullW + x];
+			partsPosData[partsPosDataLen++] = (posCount&0x00FF0000)>>16;
+			partsPosData[partsPosDataLen++] = (posCount&0x0000FF00)>>8;
+			partsPosData[partsPosDataLen++] = (posCount&0x000000FF);
+		}
+	}
+
+	//Copy parts data
+	/* Field descriptor format:
+	|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|		0		|
+	|				|				|	  pavg		|	tmp[3+4]	|		tmp2[2]	|		tmp2	|	ctype[2]	|		vy		|		vx		|	dcolor		|	ctype[1]	|		tmp[2]	|		tmp[1]	|		life[2]	|		life[1]	|	temp dbl len|
+	life[2] means a second byte (for a 16 bit field) if life[1] is present
+	*/
+	auto partsData = std::unique_ptr<unsigned char[]>(new unsigned char[NPART * (sizeof(particle)+1)]);
+	unsigned int partsDataLen = 0;
+	auto partsSaveIndex = std::unique_ptr<unsigned[]>(new unsigned[NPART]);
+	unsigned int partsCount = 0;
+	if (!partsData || !partsSaveIndex)
+		throw BuildException("Save error, out of memory");
+	std::fill(&partsSaveIndex[0], &partsSaveIndex[NPART], 0);
+	for (int y = 0; y < fullH; y++)
+	{
+		for (int x = 0; x < fullW; x++)
+		{
+			// Find the first particle in this position
+			int i = partsPosFirstMap[y*fullW + x];
+
+			// Loop while there is a pmap entry
+			while (i)
+			{
+				unsigned short fieldDesc = 0;
+				int fieldDescLoc = 0, tempTemp, vTemp;
+				
+				// Turn pmap entry into a particles index
+				i = i>>8;
+
+				// Store saved particle index+1 for this particles index (0 means not saved)
+				partsSaveIndex[i] = (partsCount++) + 1;
+
+				// Type (required)
+				partsData[partsDataLen++] = particles[i].type;
+				
+				// Location of the field descriptor
+				fieldDescLoc = partsDataLen++;
+				partsDataLen++;
+				
+				// Extra Temperature (2nd byte optional, 1st required), 1 to 2 bytes
+				// Store temperature as an offset of 21C(294.15K) or go into a 16byte int and store the whole thing
+				if (std::abs(particles[i].temp - 294.15f) < 127.0f)
+				{
+					tempTemp = (int)floor(particles[i].temp - 294.15f + 0.5f);
+					partsData[partsDataLen++] = tempTemp;
+				}
+				else
+				{
+					fieldDesc |= 1;
+					tempTemp = (int)(particles[i].temp + 0.5f);
+					partsData[partsDataLen++] = tempTemp;
+					partsData[partsDataLen++] = tempTemp >> 8;
+				}
+				
+				// Life (optional), 1 to 2 bytes
+				if (particles[i].life)
+				{
+					int life = particles[i].life;
+					if (life > 0xFFFF)
+						life = 0xFFFF;
+					else if (life < 0)
+						life = 0;
+					fieldDesc |= 1 << 1;
+					partsData[partsDataLen++] = life;
+					if (life & 0xFF00)
+					{
+						fieldDesc |= 1 << 2;
+						partsData[partsDataLen++] = life >> 8;
+					}
+				}
+				
+				// Tmp (optional), 1, 2 or 4 bytes
+				if (particles[i].tmp)
+				{
+					fieldDesc |= 1 << 3;
+					partsData[partsDataLen++] = particles[i].tmp;
+					if (particles[i].tmp & 0xFFFFFF00)
+					{
+						fieldDesc |= 1 << 4;
+						partsData[partsDataLen++] = particles[i].tmp >> 8;
+						if (particles[i].tmp & 0xFFFF0000)
+						{
+							fieldDesc |= 1 << 12;
+							partsData[partsDataLen++] = (particles[i].tmp&0xFF000000)>>24;
+							partsData[partsDataLen++] = (particles[i].tmp&0x00FF0000)>>16;
+						}
+					}
+				}
+				
+				// Ctype (optional), 1 or 4 bytes
+				if (particles[i].ctype)
+				{
+					fieldDesc |= 1 << 5;
+					partsData[partsDataLen++] = particles[i].ctype;
+					if (particles[i].ctype & 0xFFFFFF00)
+					{
+						fieldDesc |= 1 << 9;
+						partsData[partsDataLen++] = (particles[i].ctype&0xFF000000)>>24;
+						partsData[partsDataLen++] = (particles[i].ctype&0x00FF0000)>>16;
+						partsData[partsDataLen++] = (particles[i].ctype&0x0000FF00)>>8;
+					}
+				}
+				
+				// Dcolour (optional), 4 bytes
+				if (particles[i].dcolour && COLA(particles[i].dcolour))
+				{
+					fieldDesc |= 1 << 6;
+					partsData[partsDataLen++] = COLA(particles[i].dcolour);
+					partsData[partsDataLen++] = COLR(particles[i].dcolour);
+					partsData[partsDataLen++] = COLG(particles[i].dcolour);
+					partsData[partsDataLen++] = COLB(particles[i].dcolour);
+				}
+				
+				// VX (optional), 1 byte
+				if (std::abs(particles[i].vx) > 0.001f)
+				{
+					fieldDesc |= 1 << 7;
+					vTemp = (int)(particles[i].vx*16.0f+127.5f);
+					if (vTemp < 0)
+						vTemp = 0;
+					else if (vTemp > 255)
+						vTemp = 255;
+					partsData[partsDataLen++] = vTemp;
+				}
+				
+				// VY (optional), 1 byte
+				if (std::abs(particles[i].vy) > 0.001f)
+				{
+					fieldDesc |= 1 << 8;
+					vTemp = (int)(particles[i].vy*16.0f+127.5f);
+					if (vTemp<0)
+						vTemp=0;
+					if (vTemp>255)
+						vTemp=255;
+					partsData[partsDataLen++] = vTemp;
+				}
+
+				// Tmp2 (optional), 1 or 2 bytes
+#ifndef NOMOD
+				if (particles[i].tmp2 && particles[i].type != PT_PINV)
+#else
+				if (particles[i].tmp2)
+#endif
+				{
+					fieldDesc |= 1 << 10;
+					partsData[partsDataLen++] = particles[i].tmp2;
+					if (particles[i].tmp2 & 0xFF00)
+					{
+						fieldDesc |= 1 << 11;
+						partsData[partsDataLen++] = particles[i].tmp2 >> 8;
+					}
+				}
+
+				if (particles[i].pavg[0] || particles[i].pavg[1])
+				{
+					fieldDesc |= 1 << 13;
+					partsData[partsDataLen++] = (int)particles[i].pavg[0];
+					partsData[partsDataLen++] = ((int)particles[i].pavg[0])>>8;
+					partsData[partsDataLen++] = (int)particles[i].pavg[1];
+					partsData[partsDataLen++] = ((int)particles[i].pavg[1])>>8;
+				}
+				
+				// Write the field descriptor
+				partsData[fieldDescLoc] = fieldDesc&0xFF;
+				partsData[fieldDescLoc+1] = fieldDesc>>8;
+
+				if (particles[i].type == PT_SOAP)
+					soapCount++;
+
+				if (particles[i].type == PT_RPEL && particles[i].ctype)
+				{
+					RESTRICTVERSION(91, 4);
+				}
+				else if (particles[i].type == PT_NWHL && particles[i].tmp)
+				{
+					RESTRICTVERSION(91, 5);
+				}
+				if (particles[i].type == PT_HEAC || particles[i].type == PT_SAWD || particles[i].type == PT_POLO
+						|| particles[i].type == PT_RFRG || particles[i].type == PT_RFGL || particles[i].type == PT_LSNS)
+				{
+					RESTRICTVERSION(92, 0);
+				}
+				else if ((particles[i].type == PT_FRAY || particles[i].type == PT_INVIS) && particles[i].tmp)
+				{
+					RESTRICTVERSION(92, 0);
+				}
+				// Get the pmap entry for the next particle in the same position
+				i = partsPosLink[i];
+			}
+		}
+	}
+
+#ifndef NOMOD
+	unsigned char *movsData = NULL, *animData = NULL;
+	unsigned int movsDataLen = 0, animDataLen = 0;
+	auto movsDataPtr = std::unique_ptr<unsigned char[]>(), animDataPtr = std::unique_ptr<unsigned char[]>();;
+
+	if (MOVSdata.size())
+	{
+		movsData = new unsigned char[MOVSdata.size()*2];
+		if (!movsData)
+			throw BuildException("Save error, out of memory");
+		movsDataPtr = std::move(std::unique_ptr<unsigned char[]>(movsData));
+		//movsDataPtr.swap(&std::unique_ptr<unsigned char[]>(movsData));
+		for (MOVSdataItem movs : MOVSdata)
+		{
+			movsData[movsDataLen++] = movs.first;
+			movsData[movsDataLen++] = movs.second;
+		}
+	}
+
+	if (ANIMdata.size())
+	{
+		int ANIMsize = 0;
+		for (ANIMdataItem anim : ANIMdata)
+		{
+			ANIMsize += (anim.first+1)*4+1;
+		}
+
+		animData = new unsigned char[ANIMsize];
+		if (!animData)
+			throw BuildException("Save error, out of memory");
+		animDataPtr = std::unique_ptr<unsigned char[]>(animData);
+		
+		for (ANIMdataItem anim : ANIMdata)
+		{
+			animData[animDataLen++] = anim.first;
+			for (ARGBColour color : anim.second)
+			{
+				animData[animDataLen++] = COLA(color);
+				animData[animDataLen++] = COLR(color);
+				animData[animDataLen++] = COLG(color);
+				animData[animDataLen++] = COLB(color);
+			}
+		}
+	}
+#endif
+
+	auto soapLinkData = std::unique_ptr<unsigned char[]>(new unsigned char[3*soapCount]);
+	if (!soapLinkData)
+		throw BuildException("Save error, out of memory");
+	unsigned int soapLinkDataLen = 0;
+	// Iterate through particles in the same order that they were saved
+	for (int y = 0; y < fullH; y++)
+	{
+		for (int x = 0; x < fullW; x++)
+		{
+			// Find the first particle in this position
+			int i = partsPosFirstMap[y*fullW + x];
+
+			// Loop while there is a pmap entry
+			while (i)
+			{
+				// Turn pmap entry into a particles index
+				i = i>>8;
+
+				if (particles[i].type == PT_SOAP)
+				{
+					// Only save forward link for each particle, back links can be deduced from other forward links
+					// linkedIndex is index within saved particles + 1, 0 means not saved or no link
+					unsigned linkedIndex = 0;
+					if ((particles[i].ctype&2) && particles[i].tmp>=0 && particles[i].tmp<NPART)
+					{
+						linkedIndex = partsSaveIndex[particles[i].tmp];
+					}
+					soapLinkData[soapLinkDataLen++] = (linkedIndex&0xFF0000)>>16;
+					soapLinkData[soapLinkDataLen++] = (linkedIndex&0x00FF00)>>8;
+					soapLinkData[soapLinkDataLen++] = (linkedIndex&0x0000FF);
+				}
+
+				// Get the pmap entry for the next particle in the same position
+				i = partsPosLink[i];
+			}
+		}
+	}
+
+	bson b;
+	b.data = NULL;
+	auto bson_deleter = [](bson * b) { bson_destroy(b); };
+	// Use unique_ptr with a custom deleter to ensure that bson_destroy is called even when an exception is thrown
+	std::unique_ptr<bson, decltype(bson_deleter)> b_ptr(&b, bson_deleter);
+
+	bson_init(&b);
+	bson_append_start_object(&b, "origin");
+	bson_append_int(&b, "majorVersion", SAVE_VERSION);
+	bson_append_int(&b, "minorVersion", MINOR_VERSION);
+	bson_append_int(&b, "buildNum", BUILD_NUM);
+	bson_append_int(&b, "snapshotId", 0);
+#ifdef ANDROID
+	bson_append_int(&b, "mobileMajorVersion", MOBILE_MAJOR);
+	bson_append_int(&b, "mobileMinorVersion", MOBILE_MINOR);
+	bson_append_int(&b, "mobileBuildVersion", MOBILE_BUILD);
+#endif
+	bson_append_string(&b, "releaseType", IDENT_RELTYPE);
+	bson_append_string(&b, "platform", IDENT_PLATFORM);
+	bson_append_string(&b, "builtType", IDENT_BUILD);
+	bson_append_finish_object(&b);
+	bson_append_start_object(&b, "minimumVersion");
+	bson_append_int(&b, "major", minimumMajorVersion);
+	bson_append_int(&b, "minor", minimumMinorVersion);
+	bson_append_finish_object(&b);
+
+	bson_append_bool(&b, "waterEEnabled", waterEEnabled);
+	bson_append_bool(&b, "legacyEnable", legacyEnable);
+	bson_append_bool(&b, "gravityEnable", gravityEnable);
+	bson_append_bool(&b, "paused", paused);
+	bson_append_int(&b, "gravityMode", gravityMode);
+	bson_append_int(&b, "airMode", airMode);
+#ifndef NOMOD
+	bson_append_bool(&b, "msrotation", msRotation);
+#endif
+	if (decorationsEnablePresent)
+		bson_append_bool(&b, "decorations_enable", decorationsEnable);
+	if (hudEnablePresent)
+		bson_append_bool(&b, "hud_enable", hudEnable);
+	bson_append_bool(&b, "aheat_enable", aheatEnable);
+	bson_append_int(&b, "edgeMode", edgeMode);
+
+	// Render modes (Jacob1's mod)
+	if (renderModesPresent && renderModes.size())
+	{
+		unsigned int renderModeBits = 0;
+		bson_append_start_array(&b, "render_modes");
+		for (unsigned int renderMode : renderModes)
+		{
+			bson_append_int(&b, "render_mode", renderMode);
+			renderModeBits |= renderMode;
+		}
+		bson_append_finish_array(&b);
+		bson_append_int(&b, "render_mode", renderModeBits);
+	}
+
+	// Display modes (Jacob1's mod)
+	if (displayModesPresent && displayModes.size())
+	{
+		unsigned int displayModeBits;
+		bson_append_start_array(&b, "display_modes");
+		for (unsigned int displayMode : displayModes)
+		{
+			bson_append_int(&b, "display_mode", displayMode);
+			displayModeBits |= displayMode;
+		}
+		bson_append_finish_array(&b);
+		bson_append_int(&b, "display_mode", displayModeBits);
+	}
+
+	// other Jacob1's mod stuff
+	if (colorModePresent)
+		bson_append_int(&b, "color_mode", colorMode);
+	bson_append_int(&b, "Jacob1's_Mod", MOD_SAVE_VERSION);
+	bson_append_string(&b, "leftSelectedElementIdentifier", leftSelectedIdentifier.c_str());
+	bson_append_string(&b, "rightSelectedElementIdentifier", rightSelectedIdentifier.c_str());
+	if (activeMenuPresent)
+		bson_append_int(&b, "activeMenu", activeMenu);
+
+	if (partsData && partsDataLen)
+	{
+		bson_append_binary(&b, "parts", (char)BSON_BIN_USER, (const char*)partsData.get(), partsDataLen);
+
+		bson_append_start_array(&b, "palette");
+		for (std::vector<PaletteItem>::iterator iter = palette.begin(), end = palette.end(); iter != end; ++iter)
+		{
+			bson_append_int(&b, (*iter).first.c_str(), (*iter).second);
+		}
+		bson_append_finish_array(&b);
+
+		if (partsPosData && partsPosDataLen)
+			bson_append_binary(&b, "partsPos", (char)BSON_BIN_USER, (const char*)partsPosData.get(), partsPosDataLen);
+	}
+	if (wallData && hasWallData)
+		bson_append_binary(&b, "wallMap", (char)BSON_BIN_USER, (const char*)wallData.get(), wallDataLen);
+	if (fanData && fanDataLen)
+		bson_append_binary(&b, "fanMap", (char)BSON_BIN_USER, (const char*)fanData.get(), fanDataLen);
+	if (pressData && hasPressure && pressDataLen)
+		bson_append_binary(&b, "pressMap", (char)BSON_BIN_USER, (const char*)pressData.get(), pressDataLen);
+	if (vxData && hasPressure && vxDataLen)
+		bson_append_binary(&b, "vxMap", (char)BSON_BIN_USER, (const char*)vxData.get(), vxDataLen);
+	if (vyData && hasPressure && vyDataLen)
+		bson_append_binary(&b, "vyMap", (char)BSON_BIN_USER, (const char*)vyData.get(), vyDataLen);
+	if (ambientData && hasAmbientHeat && ambientDataLen)
+		bson_append_binary(&b, "ambientMap", (char)BSON_BIN_USER, (const char*)ambientData.get(), ambientDataLen);
+	if (soapLinkData && soapLinkDataLen)
+		bson_append_binary(&b, "soapLinks", (char)BSON_BIN_USER, (const char*)soapLinkData.get(), soapLinkDataLen);
+#ifndef NOMOD
+	if (movsData && movsDataLen)
+		bson_append_binary(&b, "movs", (char)BSON_BIN_USER, (const char*)movsData, movsDataLen);
+	if (animData && animDataLen)
+		bson_append_binary(&b, "anim", (char)BSON_BIN_USER, (const char*)animData, animDataLen);
+#endif
+#ifdef LUACONSOLE
+	if (luaCode.length())
+	{
+		bson_append_binary(&b, "LuaCode", (char)BSON_BIN_USER, luaCode.c_str(), luaCode.length());
+	}
+#endif
+	if (signs.size())
+	{
+		bson_append_start_array(&b, "signs");
+		for (std::vector<Sign>::iterator iter = signs.begin(), end = signs.end(); iter != end; ++iter)
+		{
+			Sign sign = (*iter);
+			bson_append_start_object(&b, "sign");
+			bson_append_string(&b, "text", sign.GetText().c_str());
+			bson_append_int(&b, "justification", (int)sign.GetJustification());
+			bson_append_int(&b, "x", sign.GetRealPos().X);
+			bson_append_int(&b, "y", sign.GetRealPos().Y);
+			bson_append_finish_object(&b);
+		}
+		bson_append_finish_array(&b);
+	}
+
+	if (saveInfoPresent)
+	{
+		bson_append_start_object(&b, "saveInfo");
+		bson_append_int(&b, "saveOpened", saveInfo.GetSaveOpened());
+		bson_append_int(&b, "fileOpened", saveInfo.GetFileOpened());
+		bson_append_string(&b, "saveName", saveInfo.GetSaveName().c_str());
+		bson_append_string(&b, "fileName", saveInfo.GetFileName().c_str());
+		bson_append_int(&b, "published", saveInfo.GetPublished());
+		bson_append_string(&b, "ID", Format::NumberToString<int>(saveInfo.GetSaveID()).c_str());
+		bson_append_string(&b, "description", saveInfo.GetDescription().c_str());
+		bson_append_string(&b, "author", saveInfo.GetAuthor().c_str());
+		bson_append_string(&b, "tags", saveInfo.GetTags().c_str());
+		bson_append_int(&b, "myVote", saveInfo.GetMyVote());
+		bson_append_finish_object(&b);
+	}
+
+	if (authors.size())
+	{
+		bson_append_start_object(&b, "authors");
+		ConvertJsonToBson(&b, authors);
+		bson_append_finish_object(&b);
+	}
+	bson_finish(&b);
+	//bson_print(&b);
+	
+	unsigned char *finalData = (unsigned char*)bson_data(&b);
+	unsigned int finalDataLen = bson_size(&b);
+	auto outputData = std::unique_ptr<unsigned char[]>(new unsigned char[finalDataLen*2+12]);
+	if (!outputData)
+		throw BuildException("Save error, out of memory");
+
+	outputData[0] = 'O';
+	outputData[1] = 'P';
+	outputData[2] = 'S';
+	outputData[3] = '1';
+	outputData[4] = SAVE_VERSION;
+	outputData[5] = CELL;
+	outputData[6] = blockWidth;
+	outputData[7] = blockHeight;
+	outputData[8] = finalDataLen;
+	outputData[9] = finalDataLen >> 8;
+	outputData[10] = finalDataLen >> 16;
+	outputData[11] = finalDataLen >> 24;
+
+	unsigned int compressedSize;
+	if (BZ2_bzBuffToBuffCompress((char*)(outputData.get()+12), &compressedSize, (char*)finalData, bson_size(&b), 9, 0, 0) != BZ_OK)
+	{
+		throw BuildException("Save error, out of memory");
+	}
+
+	saveSize = compressedSize + 12;
+	saveData = new unsigned char[saveSize];
+	std::copy(&outputData[0], &outputData[saveSize], &saveData[0]);
+}
+
 template <typename T>
 T ** Save::Allocate2DArray(int blockWidth, int blockHeight, T defaultVal)
 {
@@ -1964,4 +2596,20 @@ void Save::ConvertJsonToBson(bson *b, Json::Value j, int depth)
 			bson_append_finish_array(b);
 		}
 	}
+}
+
+Save& Save::operator <<(particle v)
+{
+	if (particlesCount < NPART && v.type)
+	{
+		particles[particlesCount++] = v;
+	}
+	return *this;
+}
+
+Save& Save::operator <<(Sign v)
+{
+	if (signs.size() < MAXSIGNS && v.GetText().length())
+		signs.push_back(v);
+	return *this;
 }

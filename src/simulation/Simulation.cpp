@@ -27,6 +27,7 @@
 #include "ElementDataContainer.h"
 #include "Tool.h"
 
+#include "common/Format.h"
 #include "common/tpt-math.h"
 #include "common/tpt-minmax.h"
 #include "game/Brush.h"
@@ -85,6 +86,11 @@ Simulation::~Simulation()
 			elementData[t] = NULL;
 		}
 	}
+	for (int t = 0; t < PT_NUM; t++)
+	{
+		free(ptypes[t].name);
+		free(ptypes[t].descs);
+	}
 	delete air;
 }
 
@@ -93,6 +99,12 @@ void Simulation::InitElements()
 	#define DEFINE_ELEMENT(name, id) if (id>=0 && id<PT_NUM) { name ## _init_element(this, &elements[id], id); };
 	#define ElementNumbers_Include_Call
 	#include "simulation/ElementNumbers.h"
+
+	for (int t = 0; t < PT_NUM; t++)
+	{
+		ptypes[t].name = NULL;
+		ptypes[t].descs = NULL;
+	}
 
 	Simulation_Compat_CopyData(this);
 }
@@ -278,7 +290,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			elementCount[parts[r>>8].type]--;
 			parts[r>>8] = tempPart;
 			i = r>>8;
-			pmap[y][x] = 0;
+			pmap[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 		else if ((r = photons[y][x]))
@@ -286,7 +298,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			elementCount[parts[r>>8].type]--;
 			parts[r>>8] = tempPart;
 			i = r>>8;
-			photons[y][x] = 0;
+			photons[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 		//Allocate new particle
@@ -299,7 +311,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			if (i > parts_lastActiveIndex)
 				parts_lastActiveIndex = i;
 			parts[i] = tempPart;
-
+			pmap[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 
@@ -465,6 +477,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			sys_pause = save->paused;
 		airMode = save->airMode;
 		gravityMode = save->gravityMode;
+		saveEdgeMode = save->edgeMode;
 		if (save->msRotationPresent)
 			msRotation = save->msRotation;
 #ifndef NOMOD
@@ -526,14 +539,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 				stop_grav_async();
 		}
 #endif
-		if (saveEdgeMode != save->edgeMode)
-		{
-			saveEdgeMode = save->edgeMode;
-			if (saveEdgeMode == 1)
-				draw_bframe();
-			else
-				erase_bframe();
-		}
 
 		if (save->luaCode.length())
 		{
@@ -548,7 +553,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 		char *log = mystrdup((*iter).c_str());
 		luacon_log(log);
 	}
-	
+
 	if (!strcmp(svf_user, "jacob1") && replace == 1)
 	{
 		for (std::vector<std::string>::iterator iter = save->adminLogMessages.begin(), end = save->adminLogMessages.end(); iter != end; ++iter)
@@ -560,6 +565,205 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 #endif
 
 	return true;
+}
+
+Save * Simulation::CreateSave(int fullX, int fullY, int fullX2, int fullY2, bool includePressure)
+{
+	// Normalise incoming coords
+	int swapTemp;
+	if (fullY > fullY2)
+	{
+		swapTemp = fullY;
+		fullY = fullY2;
+		fullY2 = swapTemp;
+	}
+	if (fullX > fullX2)
+	{
+		swapTemp = fullX;
+		fullX = fullX2;
+		fullX2 = swapTemp;
+	}
+
+	//Align coords to blockMap
+	int blockX = fullX / CELL;
+	int blockY = fullY / CELL;
+
+	int blockX2 = (fullX2+CELL-1) / CELL;
+	int blockY2 = (fullY2+CELL-1) / CELL;
+
+	int blockW = blockX2 - blockX;
+	int blockH = blockY2 - blockY;
+
+	Save * newSave = new Save(blockW, blockH);
+	
+	int storedParts = 0;
+	int elementCount[PT_NUM];
+	std::fill(elementCount, elementCount+PT_NUM, 0);
+
+	// Map of soap particles loaded into this save, new ID -> old ID
+	std::map<unsigned int, unsigned int> soapList;
+#ifndef NOMOD
+	// Stores list of moving solids in the save area
+	bool solids[MAX_MOVING_SOLIDS];
+	std::fill(&solids[0], &solids[MAX_MOVING_SOLIDS], false);
+#endif
+	for (int i = 0; i < NPART; i++)
+	{
+		int x, y;
+		x = int(parts[i].x + 0.5f);
+		y = int(parts[i].y + 0.5f);
+		if (parts[i].type && x >= fullX && y >= fullY && x < fullX2 && y < fullY2)
+		{
+			particle tempPart = parts[i];
+			tempPart.x -= blockX*CELL;
+			tempPart.y -= blockY*CELL;
+			if (elements[tempPart.type].Enabled)
+			{
+				if (tempPart.type == PT_SOAP)
+					soapList.insert(std::pair<unsigned int, unsigned int>(i, storedParts));
+#ifndef NOMOD
+				else if (tempPart.type == PT_MOVS)
+				{
+					if (tempPart.tmp2 >= 0 && tempPart.tmp2 < MAX_MOVING_SOLIDS)
+						solids[tempPart.tmp2] = true;
+				}
+				else if (tempPart.type == PT_ANIM)
+				{
+					int animLength = std::min(tempPart.ctype, maxFrames-1);
+					Save::ANIMdataItem data;
+					data.first = animLength;
+					for (int animPos = 0; animPos <= animLength; animPos++)
+					{
+						data.second.push_back(tempPart.animations[animPos]);
+					}
+					newSave->ANIMdata.push_back(data);
+				}
+#endif
+				*newSave << tempPart;
+				storedParts++;
+				elementCount[tempPart.type]++;
+			}
+		}
+	}
+
+	if (storedParts)
+	{
+		for (int i = 0; i < PT_NUM; i++)
+		{
+			if (elements[i].Enabled && elementCount[i])
+			{
+				newSave->palette.push_back(Save::PaletteItem(elements[i].Identifier, i));
+			}
+		}
+		// fix SOAP links using soapList, a map of new particle ID -> old particle ID
+		// loop through every new particle (saved into the save), and convert .tmp / .tmp2
+		for (std::map<unsigned int, unsigned int>::iterator iter = soapList.begin(), end = soapList.end(); iter != end; ++iter)
+		{
+			int i = (*iter).second;
+			if ((newSave->particles[i].ctype & 0x2) == 2)
+			{
+				std::map<unsigned int, unsigned int>::iterator n = soapList.find(newSave->particles[i].tmp);
+				if (n != end)
+					newSave->particles[i].tmp = n->second;
+				else
+				{
+					newSave->particles[i].tmp = 0;
+					newSave->particles[i].ctype ^= 2;
+				}
+			}
+			if ((newSave->particles[i].ctype & 0x4) == 4)
+			{
+				std::map<unsigned int, unsigned int>::iterator n = soapList.find(newSave->particles[i].tmp2);
+				if (n != end)
+					newSave->particles[i].tmp2 = n->second;
+				else
+				{
+					newSave->particles[i].tmp2 = 0;
+					newSave->particles[i].ctype ^= 4;
+				}
+			}
+		}
+	}
+
+	for (size_t i = 0; i < MAXSIGNS && i < signs.size(); i++)
+	{
+		if (signs[i]->GetText().length() && signs[i]->IsSignInArea(Point(fullX, fullY), Point(fullX2, fullY2)))
+		{
+			Sign tempSign = Sign(*signs[i]);
+			tempSign.SetPos(tempSign.GetRealPos() - Point(blockX*CELL, blockY*CELL));
+			*newSave << tempSign;
+		}
+	}
+	
+	for (unsigned int saveBlockX = 0; saveBlockX < newSave->blockWidth; saveBlockX++)
+	{
+		for (unsigned int saveBlockY = 0; saveBlockY < newSave->blockHeight; saveBlockY++)
+		{
+			if (bmap[saveBlockY+blockY][saveBlockX+blockX])
+			{
+				newSave->blockMap[saveBlockY][saveBlockX] = bmap[saveBlockY+blockY][saveBlockX+blockX];
+				newSave->fanVelX[saveBlockY][saveBlockX] = air->fvx[saveBlockY+blockY][saveBlockX+blockX];
+				newSave->fanVelY[saveBlockY][saveBlockX] = air->fvy[saveBlockY+blockY][saveBlockX+blockX];
+			}
+			if (includePressure)
+			{
+				newSave->pressure[saveBlockY][saveBlockX] = air->pv[saveBlockY+blockY][saveBlockX+blockX];
+				newSave->velocityX[saveBlockY][saveBlockX] = air->vx[saveBlockY+blockY][saveBlockX+blockX];
+				newSave->velocityY[saveBlockY][saveBlockX] = air->vy[saveBlockY+blockY][saveBlockX+blockX];
+				newSave->hasPressure = true;
+				if (aheat_enable)
+				{
+					newSave->ambientHeat[saveBlockY][saveBlockX] = air->hv[saveBlockY+blockY][saveBlockX+blockX];
+					newSave->hasAmbientHeat = true;
+				}
+			}
+		}
+	}
+
+#ifndef NOMOD
+	for (unsigned int bn = 0; bn < MAX_MOVING_SOLIDS; bn++)
+		// List of moving solids that are in the save area, filled above
+		if (solids[bn])
+		{
+			MovingSolid* movingSolid = ((MOVS_ElementDataContainer*)globalSim->elementData[PT_MOVS])->GetMovingSolid(bn);
+			if (movingSolid && (movingSolid->index || movingSolid->particleCount))
+			{
+				newSave->MOVSdata.push_back(Save::MOVSdataItem(bn, (char)((movingSolid->rotationOld + 2*M_PI)*20)));
+			}
+		}
+#endif
+	newSave->paused = sys_pause;
+	newSave->gravityMode = gravityMode;
+	newSave->airMode = airMode;;
+	newSave->edgeMode = edgeMode;
+	newSave->legacyEnable = legacy_enable;
+	newSave->waterEEnabled = water_equal_test;
+	newSave->gravityEnable = ngrav_enable;
+	newSave->aheatEnable = aheat_enable;
+
+	// Mod settings
+	newSave->msRotation = msRotation;
+	newSave->msRotationPresent = true;
+	newSave->leftSelectedIdentifier = activeTools[0]->GetIdentifier().c_str();
+	newSave->rightSelectedIdentifier = activeTools[1]->GetIdentifier().c_str();
+
+	newSave->saveInfo.SetSaveOpened(svf_open);
+	newSave->saveInfo.SetFileOpened(svf_fileopen);
+	newSave->saveInfo.SetSaveName(svf_name);
+	newSave->saveInfo.SetFileName(svf_filename);
+	newSave->saveInfo.SetPublished(svf_publish);
+	newSave->saveInfo.SetSaveID(Format::StringToNumber<int>(svf_id));
+	newSave->saveInfo.SetDescription(svf_description);
+	newSave->saveInfo.SetAuthor(svf_author);
+	newSave->saveInfo.SetTags(svf_tags);
+	newSave->saveInfo.SetMyVote(svf_myvote);
+	newSave->saveInfoPresent = true;
+
+	if (LuaCode)
+		newSave->luaCode = LuaCode;
+
+	newSave->expanded = true;
+	return newSave;
 }
 
 // the function for creating a particle
@@ -860,7 +1064,7 @@ void Simulation::part_delete(int x, int y)
  * This ensures that future particle allocations are done near the start of the parts array, to keep parts_lastActiveIndex low.
  * parts_lastActiveIndex is also decreased if appropriate.
  * Does not modify or even read any particles beyond parts_lastActiveIndex */
-void Simulation::RecalcFreeParticles()
+void Simulation::RecalcFreeParticles(bool doLifeDec)
 {
 	int x, y, t;
 	int lastPartUsed = 0;
@@ -915,7 +1119,7 @@ void Simulation::RecalcFreeParticles()
 			lastPartUsed = i;
 			NUM_PARTS++;
 			//decrease the life of certain elements by 1 every frame
-			if (!sys_pause || framerender)
+			if (doLifeDec && (!sys_pause || framerender))
 				decrease_life(i);
 		}
 		else
@@ -1063,7 +1267,7 @@ void Simulation::UpdateAfter()
 
 void Simulation::Tick()
 {
-	RecalcFreeParticles();
+	RecalcFreeParticles(true);
 	if (!sys_pause || framerender)
 	{
 		UpdateBefore();
@@ -3290,12 +3494,13 @@ void Simulation_Compat_CopyData(Simulation* sim)
 	// TODO: this can be removed once all the code uses Simulation instead of global variables
 	parts = sim->parts;
 
-
-	for (int t=0; t<PT_NUM; t++)
+	for (int t = 0; t < PT_NUM; t++)
 	{
+		free(ptypes[t].name);
 		ptypes[t].name = mystrdup(sim->elements[t].Name.c_str());
 		ptypes[t].enabled = sim->elements[t].Enabled;
 		ptypes[t].heat = sim->elements[t].DefaultProperties.temp;
+		free(ptypes[t].descs);
 		ptypes[t].descs = mystrdup(sim->elements[t].Description.c_str());
 		ptypes[t].properties = sim->elements[t].Properties;
 		ptypes[t].graphics_func = sim->elements[t].Graphics;

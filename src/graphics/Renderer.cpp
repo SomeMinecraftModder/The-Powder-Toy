@@ -240,10 +240,10 @@ void Renderer::LoadSave(Save *save)
 	{
 		render_mode = 0;
 		ClearRenderModes();
-		for (std::vector<unsigned int>::const_iterator iter = save->renderModes.begin(), end = save->renderModes.end(); iter != end; ++iter)
+		for (std::set<unsigned int>::const_iterator iter = save->renderModes.begin(), end = save->renderModes.end(); iter != end; ++iter)
 		{
 			renderModes.insert(*iter);
-			Renderer::Ref().AddRenderMode(*iter);
+			AddRenderMode(*iter);
 		}
 	}
 
@@ -251,13 +251,35 @@ void Renderer::LoadSave(Save *save)
 	{
 		display_mode = 0;
 		ClearDisplayModes();
-		for (std::vector<unsigned int>::const_iterator iter = save->displayModes.begin(), end = save->displayModes.end(); iter != end; ++iter)
+		for (std::set<unsigned int>::const_iterator iter = save->displayModes.begin(), end = save->displayModes.end(); iter != end; ++iter)
 		{
 			displayModes.insert(*iter);
-			Renderer::Ref().AddDisplayMode(*iter);
+			AddDisplayMode(*iter);
 		}
 	}
 
 	if (save->colorModePresent)
 		colorMode = save->colorMode;
+}
+
+// Called when creating tabs. Used to save some renderer settings
+void Renderer::CreateSave(Save *save)
+{
+	save->decorationsEnable = decorations_enable;
+	save->decorationsEnablePresent = true;
+	save->hudEnable = hud_enable;
+	save->hudEnablePresent = true;
+	save->activeMenu = active_menu;
+	save->activeMenuPresent = true;
+
+	for (unsigned int renderMode : renderModes)
+		save->renderModes.insert(renderMode);
+	save->renderModesPresent = true;
+
+	for (unsigned int displayMode : displayModes)
+		save->displayModes.insert(displayMode);
+	save->displayModesPresent = true;
+
+	save->colorMode = colorMode;
+	save->colorModePresent = true;
 }
