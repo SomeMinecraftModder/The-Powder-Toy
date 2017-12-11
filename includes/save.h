@@ -18,6 +18,7 @@
 #define SAVEOLD_H
 #include <vector>
 #include "BSON.h"
+#include "common/Matrix.h"
 #include "json/json.h"
 #include "simulation/ElementNumbers.h"
 #include "graphics/Pixel.h"
@@ -25,7 +26,7 @@
 class Sign;
 
 //transforms a save when you move it around with the arrow keys, or rotate it
-void *transform_save(void *odata, int *size, matrix2d transform, vector2d translate);
+void *transform_save(void *odata, int *size, Matrix::matrix2d transform, Matrix::vector2d translate);
 
 //builds a thumb or something? idk
 void *build_thumb(int *size, int bzip2);

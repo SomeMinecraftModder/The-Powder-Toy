@@ -76,6 +76,7 @@ private:
 	Point loadSize;
 	Save *stampData;
 	pixel *stampImg;
+	Point stampOffset;
 	bool waitToDraw; // wait a frame to draw stamp after load, because it will be in the wrong spot until another mouse event comes in
 	// touch ui stuff for rotating / moving stamps
 #ifdef TOUCHUI
@@ -170,6 +171,8 @@ public:
 	Point GetSavePos() { return savePos; }
 	Point GetSaveSize() { return saveSize; }
 	bool PlacedInitialStampCoordinate() { return isStampMouseDown; }
+	void TranslateSave(Point point);
+	void TransformSave(int a, int b, int c, int d);
 
 	void OnTick(uint32_t ticks);
 	void OnDraw(VideoBuffer *buf);

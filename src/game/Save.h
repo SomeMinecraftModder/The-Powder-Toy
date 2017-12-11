@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include "BSON.h"
+#include "common/Matrix.h"
 #include "game/SaveInfo.h"
 #include "game/Sign.h"
 #include "graphics/ARGBColour.h"
@@ -160,11 +161,12 @@ public:
 	// Newer saves use palette instead, this is only for old saves
 	int FixType(int type);
 
+	Matrix::vector2d Translate(Matrix::vector2d translate);
+	void Transform(Matrix::matrix2d transform, Matrix::vector2d translate);
+	void Transform(Matrix::matrix2d transform, Matrix::vector2d translate, Matrix::vector2d translateReal, int newWidth, int newHeight);
+
 	Save& operator <<(particle v);
 	Save& operator <<(Sign v);
-
-	unsigned char* tempGetData() { return saveData; }
-	unsigned int tempGetSize() { return saveSize; }
 
 	/** If this save is not expanded, it will parse it
 	 ** This could take a while and may throw a BuildException
@@ -178,6 +180,7 @@ public:
 private:
 	unsigned char *saveData;
 	unsigned int saveSize;
+	Matrix::vector2d translated;
 
 	Save();
 	void Dealloc();

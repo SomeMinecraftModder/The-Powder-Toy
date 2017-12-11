@@ -31,6 +31,8 @@
 #include "simulation/ToolNumbers.h"
 #include "simulation/WallNumbers.h"
 
+using namespace Matrix;
+
 // Used for creating saves from save data. Loading stamps / online saves, for example
 Save::Save(char * saveData, unsigned int saveSize)
 {
@@ -215,6 +217,8 @@ void Save::InitVars()
 	displayModesPresent = false;
 	colorMode = 0;
 	colorModePresent = false;
+
+	translated.x = translated.y = 0;
 }
 
 const unsigned char * const Save::GetSaveData()
@@ -2455,6 +2459,245 @@ void Save::BuildSave()
 	saveSize = compressedSize + 12;
 	saveData = new unsigned char[saveSize];
 	std::copy(&outputData[0], &outputData[saveSize], &saveData[0]);
+}
+
+vector2d Save::Translate(vector2d translate)
+{
+	if (expanded && !saveData)
+		BuildSave();
+
+	vector2d translateReal = translate;
+	float minx = 0, miny = 0, maxx = 0, maxy = 0;
+	// determine minimum and maximum position of all particles / signs
+	for (const Sign sign: signs)
+	{
+		vector2d pos = v2d_new(sign.GetRealPos().X, sign.GetRealPos().Y);
+		pos = v2d_add(pos, translate);
+		int nx = std::floor(pos.x + 0.5f);
+		int ny = std::floor(pos.y + 0.5f);
+		if (nx < minx)
+			minx = nx;
+		else if (nx > maxx)
+			maxx = nx;
+		if (ny < miny)
+			miny = ny;
+		else if (ny > maxy)
+			maxy = ny;
+	}
+	for (unsigned int i = 0; i < particlesCount; i++)
+	{
+		if (!particles[i].type)
+			continue;
+		vector2d pos = v2d_new(particles[i].x, particles[i].y);
+		pos = v2d_add(pos, translate);
+		int nx = std::floor(pos.x + 0.5f);
+		int ny = std::floor(pos.y + 0.5f);
+		if (nx < minx)
+			minx = nx;
+		else if (nx > maxx)
+			maxx = nx;
+		if (ny < miny)
+			miny = ny;
+		else if (ny > maxy)
+			maxy = ny;
+	}
+	// determine whether corrections are needed. If moving in this direction would delete stuff, expand the save
+	vector2d backCorrection = v2d_new(
+		(minx < 0) ? (-floor(minx / CELL)) : 0,
+		(miny < 0) ? (-floor(miny / CELL)) : 0
+	);
+	unsigned int blockBoundsX = int(maxx / CELL) + 1, blockBoundsY = int(maxy / CELL) + 1;
+	vector2d frontCorrection = v2d_new(
+		(blockBoundsX > blockWidth) ? (blockBoundsX - blockWidth) : 0,
+		(blockBoundsY > blockHeight) ? (blockBoundsY - blockHeight) : 0
+	);
+
+	// get new width based on corrections
+	int newWidth = (blockWidth + backCorrection.x + frontCorrection.x) * CELL;
+	int newHeight = (blockHeight + backCorrection.y + frontCorrection.y) * CELL;
+	if (newWidth > XRES)
+		frontCorrection.x = backCorrection.x = 0;
+	if (newHeight > YRES)
+		frontCorrection.y = backCorrection.y = 0;
+
+	// call Transform to do the transformation we wanted when calling this function
+	translate = v2d_add(translate, v2d_multiply_float(backCorrection, CELL));
+	Transform(m2d_identity, translate, translateReal,
+	    (blockWidth + backCorrection.x + frontCorrection.x) * CELL,
+	    (blockHeight + backCorrection.y + frontCorrection.y) * CELL
+	);
+
+	// return how much we corrected. This is used to offset the position of the current stamp
+	// otherwise it would attempt to recenter it with the current size
+	return v2d_add(v2d_multiply_float(backCorrection, -CELL), v2d_multiply_float(frontCorrection, CELL));
+}
+
+void Save::Transform(matrix2d transform, vector2d translate)
+{
+	if (expanded && !saveData)
+		BuildSave();
+
+	int width = blockWidth*CELL, height = blockHeight*CELL, newWidth, newHeight;
+	// top left, bottom right corner
+	vector2d ctl, cbr;
+	vector2d cornerso[4];
+	vector2d translateReal = translate;
+	// undo any translation caused by rotation
+	cornerso[0] = v2d_new(0, 0);
+	cornerso[1] = v2d_new(width - 1, 0);
+	cornerso[2] = v2d_new(0, height - 1);
+	cornerso[3] = v2d_new(width - 1, height - 1);
+	for (int i = 0; i < 4; i++)
+	{
+		vector2d tmp = m2d_multiply_v2d(transform, cornerso[i]);
+		if (i == 0)
+			ctl = cbr = tmp;
+		if (tmp.x < ctl.x)
+			ctl.x = tmp.x;
+		else if (tmp.x > cbr.x)
+			cbr.x = tmp.x;
+		if (tmp.y < ctl.y)
+			ctl.y = tmp.y;
+		else if (tmp.y > cbr.y)
+			cbr.y = tmp.y;
+	}
+	// casting as int doesn't quite do what we want with negative numbers, so use floor()
+	vector2d tmp = v2d_new(floor(ctl.x+0.5f),floor(ctl.y+0.5f));
+	translate = v2d_sub(translate,tmp);
+	newWidth = std::floor(cbr.x+0.5f)-floor(ctl.x+0.5f)+1;
+	newHeight = std::floor(cbr.y+0.5f)-floor(ctl.y+0.5f)+1;
+	Transform(transform, translate, translateReal, newWidth, newHeight);
+}
+
+// transform is a matrix describing how we want to rotate this save
+// translate can vary depending on whether the save is bring rotated, or if a normal translate caused it to expand
+// translateReal is the original amount we tried to translate, used to calculate wall shifting
+void Save::Transform(matrix2d transform, vector2d translate, vector2d translateReal, int newWidth, int newHeight)
+{
+	if (expanded && !saveData)
+		BuildSave();
+
+	if (newWidth > XRES)
+		newWidth = XRES;
+	if (newHeight > YRES)
+		newHeight = YRES;
+
+	int newBlockWidth = newWidth / CELL, newBlockHeight = newHeight / CELL;
+
+	unsigned char **blockMapNew = Allocate2DArray<unsigned char>(newBlockWidth, newBlockHeight, 0);
+	float **fanVelXNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+	float **fanVelYNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+	float **pressureNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+	float **velocityXNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+	float **velocityYNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+	float **ambientHeatNew = Allocate2DArray<float>(newBlockWidth, newBlockHeight, 0.0f);
+
+	// rotate and translate signs, parts, walls
+	for (size_t i = 0; i < signs.size(); i++)
+	{
+		vector2d pos = v2d_new(signs[i].GetRealPos().X, signs[i].GetRealPos().Y);
+		pos = v2d_add(m2d_multiply_v2d(transform,pos), translate);
+		int nx = std::floor(pos.x + 0.5f);
+		int ny = std::floor(pos.y + 0.5f);
+		if (nx < 0 || nx >= newWidth || ny < 0 || ny >= newHeight)
+		{
+			signs[i].SetText("");
+			continue;
+		}
+		signs[i].SetPos(Point(nx, ny));
+	}
+	for (unsigned int i = 0; i < particlesCount; i++)
+	{
+		if (!particles[i].type)
+			continue;
+		vector2d pos = v2d_new(particles[i].x, particles[i].y);
+		pos = v2d_add(m2d_multiply_v2d(transform,pos),translate);
+		int nx = std::floor(pos.x + 0.5f);
+		int ny = std::floor(pos.y + 0.5f);
+		if (nx<0 || nx>=newWidth || ny<0 || ny>=newHeight)
+		{
+			particles[i].type = PT_NONE;
+			continue;
+		}
+		particles[i].x = nx;
+		particles[i].y = ny;
+		vector2d vel = v2d_new(particles[i].vx, particles[i].vy);
+		vel = m2d_multiply_v2d(transform, vel);
+		particles[i].vx = vel.x;
+		particles[i].vy = vel.y;
+	}
+
+	// translate walls and other grid items when the stamp is shifted more than 4 pixels in any direction
+	int translateX = 0, translateY = 0;
+	if (translateReal.x > 0 && ((int)translated.x%CELL == 3
+	                        || (translated.x < 0 && (int)translated.x%CELL == 0)))
+		translateX = CELL;
+	else if (translateReal.x < 0 && ((int)translated.x%CELL == -3
+	                             || (translated.x > 0 && (int)translated.x%CELL == 0)))
+		translateX = -CELL;
+	if (translateReal.y > 0 && ((int)translated.y%CELL == 3
+	                        || (translated.y < 0 && (int)translated.y%CELL == 0)))
+		translateY = CELL;
+	else if (translateReal.y < 0 && ((int)translated.y%CELL == -3
+	                             || (translated.y > 0 && (int)translated.y%CELL == 0)))
+		translateY = -CELL;
+
+	for (unsigned int y = 0; y < blockHeight; y++)
+		for (unsigned int x = 0; x < blockWidth; x++)
+		{
+			vector2d pos = v2d_new(x*CELL+CELL*0.4f+translateX, y*CELL+CELL*0.4f+translateY);
+			pos = v2d_add(m2d_multiply_v2d(transform,pos),translate);
+			int nx = pos.x/CELL;
+			int ny = pos.y/CELL;
+			if (pos.x<0 || nx>=newBlockWidth || pos.y<0 || ny>=newBlockHeight)
+				continue;
+			if (blockMap[y][x])
+			{
+				blockMapNew[ny][nx] = blockMap[y][x];
+				if (blockMap[y][x] == WL_FAN)
+				{
+					vector2d vel = v2d_new(fanVelX[y][x], fanVelY[y][x]);
+					vel = m2d_multiply_v2d(transform, vel);
+					fanVelXNew[ny][nx] = vel.x;
+					fanVelYNew[ny][nx] = vel.y;
+				}
+			}
+			pressureNew[ny][nx] = pressure[y][x];
+			velocityXNew[ny][nx] = velocityX[y][x];
+			velocityYNew[ny][nx] = velocityY[y][x];
+			ambientHeatNew[ny][nx] = ambientHeat[y][x];
+		}
+	translated = v2d_add(m2d_multiply_v2d(transform, translated), translateReal);
+
+	for (unsigned int j = 0; j < blockHeight; j++)
+	{
+		delete[] blockMap[j];
+		delete[] fanVelX[j];
+		delete[] fanVelY[j];
+		delete[] pressure[j];
+		delete[] velocityX[j];
+		delete[] velocityY[j];
+		delete[] ambientHeat[j];
+	}
+
+	blockWidth = newBlockWidth;
+	blockHeight = newBlockHeight;
+
+	delete[] blockMap;
+	delete[] fanVelX;
+	delete[] fanVelY;
+	delete[] pressure;
+	delete[] velocityX;
+	delete[] velocityY;
+	delete[] ambientHeat;
+
+	blockMap = blockMapNew;
+	fanVelX = fanVelXNew;
+	fanVelY = fanVelYNew;
+	pressure = pressureNew;
+	velocityX = velocityXNew;
+	velocityY = velocityYNew;
+	ambientHeat = ambientHeatNew;
 }
 
 template <typename T>

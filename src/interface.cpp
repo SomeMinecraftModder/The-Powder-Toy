@@ -6270,30 +6270,29 @@ int execute_save(pixel *vid_buf, Save *save)
 	int status;
 	char *result;
 
-	const char *names[] = {"Name","Description", "Data:save.bin", "Thumb:thumb.bin", "Publish", "ID", NULL};
-	char *uploadparts[6];
-	size_t plens[6];
+	const char *names[] = {"Name", "Description", "Data:save.bin", "Publish", "ID", NULL};
+	char *uploadparts[5];
+	size_t plens[5];
 
 	uploadparts[0] = svf_name;
 	plens[0] = strlen(svf_name);
 	uploadparts[1] = svf_description;
 	plens[1] = strlen(svf_description);
-	int len;
 
 	uploadparts[2] = (char*)saveData;
 	plens[2] = saveSize;
-	uploadparts[3] = (char*)build_thumb(&len, 1);
-	plens[3] = len;
-	uploadparts[4] = (char*)((svf_publish==1)?"Public":"Private");
-	plens[4] = strlen((svf_publish==1)?"Public":"Private");
+	//uploadparts[3] = (char*)build_thumb(&len, 1);
+	//plens[3] = len;
+	uploadparts[3] = (char*)((svf_publish==1)?"Public":"Private");
+	plens[3] = strlen((svf_publish==1)?"Public":"Private");
 
 	if (svf_id[0])
 	{
-		uploadparts[5] = svf_id;
-		plens[5] = strlen(svf_id);
+		uploadparts[4] = svf_id;
+		plens[4] = strlen(svf_id);
 	}
 	else
-		names[5] = NULL;
+		names[4] = NULL;
 
 	result = http_multipart_post(
 	             "http://" SERVER "/Save.api",
@@ -6303,8 +6302,8 @@ int execute_save(pixel *vid_buf, Save *save)
 
 	the_game->SetReloadPoint(save);
 
-	if (uploadparts[3])
-		free(uploadparts[3]);
+	//if (uploadparts[3])
+	//	free(uploadparts[3]);
 
 	if (status!=200)
 	{
@@ -7716,6 +7715,7 @@ int save_filename_ui(pixel *vid_buf, Save *save)
 			clean_text(ed.str,256);
 			if (strlen(ed.str))
 			{
+				save->authors["title"] = ed.str;
 				ret = DoLocalSave(ed.str, save);
 				if (ret == -1)
 				{

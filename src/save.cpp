@@ -31,6 +31,7 @@
 #include "interface.h"
 #include "luaconsole.h"
 
+#include "common/Matrix.h"
 #include "common/Platform.h"
 #include "game/Authors.h"
 #include "game/Menus.h"
@@ -46,6 +47,8 @@
 #include "simulation/elements/LIFE.h"
 #include "simulation/elements/MOVS.h"
 #include "simulation/elements/STKM.h"
+
+using namespace Matrix;
 
 //Pop
 pixel *prerender_save(void *save, int size, int *width, int *height)

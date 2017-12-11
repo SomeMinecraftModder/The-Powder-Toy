@@ -16,6 +16,7 @@
 #include "update.h"
 
 #include "common/Format.h"
+#include "common/Matrix.h"
 #include "common/Platform.h"
 #include "game/Authors.h"
 #include "game/Brush.h"
@@ -90,6 +91,7 @@ PowderToy::PowderToy():
 	loadSize(Point(0, 0)),
 	stampData(NULL),
 	stampImg(NULL),
+	stampOffset(Point(0, 0)),
 	waitToDraw(false),
 #ifdef TOUCHUI
 	stampClickedPos(Point(0, 0)),
@@ -1052,6 +1054,33 @@ void PowderToy::ResetStampState()
 	state = NONE;
 	isStampMouseDown = false;
 	isMouseDown = false; // do this here also because we always want to cancel mouse drawing when going into a new stamp state
+	stampOffset = Point(0, 0);
+}
+
+void PowderToy::TranslateSave(Point point)
+{
+	if (stampData)
+	{
+		Matrix::vector2d translate = Matrix::v2d_new(point.X, point.Y);
+		Matrix::vector2d translated = stampData->Translate(translate);
+		stampOffset += Point(translated.x, translate.y);
+
+		free(stampImg);
+		stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
+	}
+}
+
+void PowderToy::TransformSave(int a, int b, int c, int d)
+{
+	if (stampData)
+	{
+		Matrix::matrix2d transform = Matrix::m2d_new(a, b, c, d);
+		Matrix::vector2d translate = Matrix::v2d_zero;
+		stampData->Transform(transform, translate);
+
+		free(stampImg);
+		stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
+	}
 }
 
 void PowderToy::HideZoomWindow()
@@ -2111,46 +2140,34 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 	// if stamp was transformed, key presses get ignored
 	if (state == LOAD)
 	{
-		matrix2d transform = m2d_identity;
-		vector2d translate = v2d_zero;
-		bool doTransform = true;
-
 		switch (key)
 		{
 		case 'r':
 			// vertical invert
 			if (ctrlHeld && shiftHeld)
-			{
-				transform = m2d_new(1, 0, 0, -1);
-			}
+				TransformSave(1, 0, 0, -1);
 			// horizontal invert
 			else if (shiftHeld)
-			{
-				transform = m2d_new(-1, 0, 0, 1);
-			}
+				TransformSave(-1, 0, 0, 1);
 			// rotate anticlockwise 90 degrees
 			else
-			{
-				transform = m2d_new(0, 1, -1, 0);
-			}
+				TransformSave(0, 1, -1, 0);
 			break;
 		case SDLK_LEFT:
-			translate = v2d_new(-1, 0);
+			TranslateSave(Point(-1, 0));
 			break;
 		case SDLK_RIGHT:
-			translate = v2d_new(1, 0);
+			TranslateSave(Point(1, 0));
 			break;
 		case SDLK_UP:
-			translate = v2d_new(0, -1);
+			TranslateSave(Point(0, -1));
 			break;
 		case SDLK_DOWN:
-			translate = v2d_new(0, 1);
+			TranslateSave(Point(0, 1));
 			break;
-		default:
-			doTransform = false;
 		}
 
-		if (doTransform)
+		/*if (doTransform)
 		{
 			int size = stampData->GetSaveSize();
 			char *newData = (char*)transform_save((char*)stampData->GetSaveData(), &size, transform, translate);
@@ -2161,7 +2178,7 @@ void PowderToy::OnKeyPress(int key, unsigned short character, unsigned short mod
 			free(stampImg);
 			stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
 			return;
-		}
+		}*/
 	}
 
 	// handle normal keypresses
