@@ -2180,7 +2180,7 @@ void Save::BuildSave()
 #ifndef NOMOD
 	unsigned char *movsData = NULL, *animData = NULL;
 	unsigned int movsDataLen = 0, animDataLen = 0;
-	auto movsDataPtr = std::unique_ptr<unsigned char[]>(), animDataPtr = std::unique_ptr<unsigned char[]>();;
+	auto movsDataPtr = std::unique_ptr<unsigned char[]>(), animDataPtr = std::unique_ptr<unsigned char[]>();
 
 	if (MOVSdata.size())
 	{
@@ -2188,7 +2188,6 @@ void Save::BuildSave()
 		if (!movsData)
 			throw BuildException("Save error, out of memory");
 		movsDataPtr = std::move(std::unique_ptr<unsigned char[]>(movsData));
-		//movsDataPtr.swap(&std::unique_ptr<unsigned char[]>(movsData));
 		for (MOVSdataItem movs : MOVSdata)
 		{
 			movsData[movsDataLen++] = movs.first;
@@ -2207,7 +2206,7 @@ void Save::BuildSave()
 		animData = new unsigned char[ANIMsize];
 		if (!animData)
 			throw BuildException("Save error, out of memory");
-		animDataPtr = std::unique_ptr<unsigned char[]>(animData);
+		animDataPtr = std::move(std::unique_ptr<unsigned char[]>(animData));
 		
 		for (ANIMdataItem anim : ANIMdata)
 		{
@@ -2223,40 +2222,47 @@ void Save::BuildSave()
 	}
 #endif
 
-	auto soapLinkData = std::unique_ptr<unsigned char[]>(new unsigned char[3*soapCount]);
-	if (!soapLinkData)
-		throw BuildException("Save error, out of memory");
+	unsigned char *soapLinkData = NULL;
+	auto soapLinkDataPtr = std::unique_ptr<unsigned char[]>();
 	unsigned int soapLinkDataLen = 0;
-	// Iterate through particles in the same order that they were saved
-	for (int y = 0; y < fullH; y++)
+	if (soapCount)
 	{
-		for (int x = 0; x < fullW; x++)
+		soapLinkData = new unsigned char[3*soapCount];
+		if (!soapLinkData)
+			throw BuildException("Save error, out of memory");
+		soapLinkDataPtr = std::move(std::unique_ptr<unsigned char[]>(soapLinkData));
+		
+		// Iterate through particles in the same order that they were saved
+		for (int y = 0; y < fullH; y++)
 		{
-			// Find the first particle in this position
-			int i = partsPosFirstMap[y*fullW + x];
-
-			// Loop while there is a pmap entry
-			while (i)
+			for (int x = 0; x < fullW; x++)
 			{
-				// Turn pmap entry into a particles index
-				i = i>>8;
-
-				if (particles[i].type == PT_SOAP)
+				// Find the first particle in this position
+				int i = partsPosFirstMap[y*fullW + x];
+	
+				// Loop while there is a pmap entry
+				while (i)
 				{
-					// Only save forward link for each particle, back links can be deduced from other forward links
-					// linkedIndex is index within saved particles + 1, 0 means not saved or no link
-					unsigned linkedIndex = 0;
-					if ((particles[i].ctype&2) && particles[i].tmp>=0 && particles[i].tmp<NPART)
+					// Turn pmap entry into a particles index
+					i = i>>8;
+	
+					if (particles[i].type == PT_SOAP)
 					{
-						linkedIndex = partsSaveIndex[particles[i].tmp];
+						// Only save forward link for each particle, back links can be deduced from other forward links
+						// linkedIndex is index within saved particles + 1, 0 means not saved or no link
+						unsigned linkedIndex = 0;
+						if ((particles[i].ctype&2) && particles[i].tmp>=0 && particles[i].tmp<NPART)
+						{
+							linkedIndex = partsSaveIndex[particles[i].tmp];
+						}
+						soapLinkData[soapLinkDataLen++] = (linkedIndex&0xFF0000)>>16;
+						soapLinkData[soapLinkDataLen++] = (linkedIndex&0x00FF00)>>8;
+						soapLinkData[soapLinkDataLen++] = (linkedIndex&0x0000FF);
 					}
-					soapLinkData[soapLinkDataLen++] = (linkedIndex&0xFF0000)>>16;
-					soapLinkData[soapLinkDataLen++] = (linkedIndex&0x00FF00)>>8;
-					soapLinkData[soapLinkDataLen++] = (linkedIndex&0x0000FF);
+	
+					// Get the pmap entry for the next particle in the same position
+					i = partsPosLink[i];
 				}
-
-				// Get the pmap entry for the next particle in the same position
-				i = partsPosLink[i];
 			}
 		}
 	}
@@ -2367,7 +2373,7 @@ void Save::BuildSave()
 	if (ambientData && hasAmbientHeat && ambientDataLen)
 		bson_append_binary(&b, "ambientMap", (char)BSON_BIN_USER, (const char*)ambientData.get(), ambientDataLen);
 	if (soapLinkData && soapLinkDataLen)
-		bson_append_binary(&b, "soapLinks", (char)BSON_BIN_USER, (const char*)soapLinkData.get(), soapLinkDataLen);
+		bson_append_binary(&b, "soapLinks", (char)BSON_BIN_USER, (const char*)soapLinkData, soapLinkDataLen);
 #ifndef NOMOD
 	if (movsData && movsDataLen)
 		bson_append_binary(&b, "movs", (char)BSON_BIN_USER, (const char*)movsData, movsDataLen);

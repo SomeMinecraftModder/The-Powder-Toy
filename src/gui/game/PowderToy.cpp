@@ -15,6 +15,7 @@
 #include "save.h"
 #include "update.h"
 
+#include "common/Format.h"
 #include "common/Platform.h"
 #include "game/Authors.h"
 #include "game/Brush.h"
@@ -510,6 +511,8 @@ void PowderToy::ReloadSaveBtn(unsigned char b)
 
 void PowderToy::DoSaveBtn(unsigned char b)
 {
+	Save *save = sim->CreateSave(0, 0, XRES, YRES);
+	// Local save
 #ifdef TOUCHUI
 	if (!svf_login || (sdl_mod & (KMOD_CTRL|KMOD_META)) || b != 1)
 #else
@@ -522,8 +525,7 @@ void PowderToy::DoSaveBtn(unsigned char b)
 		localSaveInfo["title"] = svf_fileopen ? svf_filename : "unknown";
 		localSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
 		SaveAuthorInfo(&localSaveInfo);
-		Save * localSave = sim->CreateSave(0, 0, XRES, YRES);
-		localSave->authors = localSaveInfo;
+		save->authors = localSaveInfo;
 
 		bool isQuickSave = mouse.X <= saveButton->GetPosition().X+18 && svf_fileopen;
 		// local quick save
@@ -531,51 +533,70 @@ void PowderToy::DoSaveBtn(unsigned char b)
 		{
 			if (!isQuickSave)
 			{
-				int ret = save_filename_ui(vid_buf, localSave);
+				int ret = save_filename_ui(vid_buf, save);
 				if (!ret)
-					authors = localSave->authors;
+					authors = save->authors;
 			}
-			else if (DoLocalSave(svf_filename, localSave, true))
+			else if (DoLocalSave(svf_filename, save, true))
 				SetInfoTip("Error writing local save");
 			else
 				SetInfoTip("Updated successfully");
 		}
 		catch (BuildException e)
 		{
-			SetInfoTip("Error creating save: " + std::string(e.what()));
+			clear_save_info();
+			Engine::Ref().ShowWindow(new ErrorPrompt("Error creating save: " + std::string(e.what())));
 		}
-		delete localSave;
 	}
+	// Online save
 	else
 	{
-		// local save
+		bool isQuickSave = true;
+		// not a quicksave
 		if (!svf_open || !svf_own || mouse.X > saveButton->GetPosition().X+18)
 		{
-			if (save_name_ui(vid_buf))
+			// if user canceled the save, then do nothing
+			if (!save_name_ui(vid_buf))
 			{
-				if (!execute_save(vid_buf) && svf_id[0])
-				{
-					copytext_ui(vid_buf, "Save ID", "Saved successfully!", svf_id);
-				}
-				else
-				{
-					SetInfoTip("Error saving");
-				}
+				delete save;
+				return;
 			}
+			isQuickSave = false;
 		}
-		// local quick save
-		else
+
+		Json::Value serverSaveInfo;
+		serverSaveInfo["type"] = "save";
+		serverSaveInfo["username"] = svf_user;
+		serverSaveInfo["id"] = svf_id[0] ? atoi(svf_id) : -1;
+		serverSaveInfo["title"] = svf_name;
+		serverSaveInfo["description"] = svf_description;
+		serverSaveInfo["published"] = svf_publish;
+		serverSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
+		SaveAuthorInfo(&serverSaveInfo);
+		save->authors = serverSaveInfo;
+
+		try
 		{
-			if (execute_save(vid_buf))
+			bool success = !execute_save(vid_buf, save);
+			if (success)
 			{
-				SetInfoTip("Error saving");
+				if (isQuickSave)
+					SetInfoTip("Saved successfully");
+				else
+					copytext_ui(vid_buf, "Save ID", "Saved successfully!", svf_id);
+				save->authors["id"] = Format::StringToNumber<int>(svf_id);
+				authors = save->authors;
 			}
 			else
-			{
-				SetInfoTip("Saved successfully");
-			}
+				SetInfoTip("Error saving");
+		}
+		catch (BuildException e)
+		{
+			clear_save_info();
+			Engine::Ref().ShowWindow(new ErrorPrompt("Error creating save: " + std::string(e.what())));
 		}
 	}
+	delete save;
 }
 
 void PowderToy::DoVoteBtn(bool up)

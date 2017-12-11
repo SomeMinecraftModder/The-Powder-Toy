@@ -168,11 +168,11 @@ public:
 
 	/** If this save is not expanded, it will parse it
 	 ** This could take a while and may throw a BuildException
-     **/
+	 **/
 	const unsigned char * const GetSaveData();
 	/** If this save is not expanded, it will parse it
 	 ** This could take a while and may throw a BuildException
-     **/
+	 **/
 	unsigned int GetSaveSize();
 
 private:

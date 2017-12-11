@@ -385,21 +385,10 @@ void clear_sim()
 void NewSim()
 {
 	clear_sim();
+	clear_save_info();
 	legacy_enable = 0;
-	svf_filename[0] = 0;
-	svf_fileopen = 0;
-	svf_myvote = 0;
-	svf_open = 0;
-	svf_publish = 0;
-	svf_own = 0;
-	svf_id[0] = 0;
-	svf_name[0] = 0;
-	svf_tags[0] = 0;
-	svf_description[0] = 0;
-	svf_author[0] = 0;
 	gravityMode = 0;
 	airMode = 0;
-	the_game->SetReloadPoint(NULL);
 }
 
 // stamps library
@@ -491,7 +480,6 @@ char* stamp_save(int x, int y, int w, int h, bool includePressure)
 {
 	FILE *f;
 	char fn[64], sn[16];
-	int n;
 
 	// Generate filename
 	stamp_gen_name(sn);
@@ -508,9 +496,19 @@ char* stamp_save(int x, int y, int w, int h, bool includePressure)
 		stampInfo["links"].append(authors);
 	}
 
-	void *s = build_save(&n, x, y, w, h, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, &stampInfo, false, includePressure);
-	if (!s)
+	Save *save = globalSim->CreateSave(x, y, x+w, y+h, includePressure);
+	save->authors = stampInfo;
+	try
+	{
+		save->BuildSave();
+	}
+	catch (BuildException e)
+	{
+		ErrorPrompt *error = new ErrorPrompt("Error building stamp: " + std::string(e.what()));
+		Engine::Ref().ShowWindow(error);
+		delete save;
 		return NULL;
+	}
 
 #ifdef WIN
 	_mkdir("stamps");
@@ -521,10 +519,10 @@ char* stamp_save(int x, int y, int w, int h, bool includePressure)
 	f = fopen(fn, "wb");
 	if (!f)
 		return NULL;
-	fwrite(s, n, 1, f);
+	fwrite(save->GetSaveData(), save->GetSaveSize(), 1, f);
 	fclose(f);
 
-	free(s);
+	delete save;
 
 	if (stamps[STAMP_MAX-1].thumb)
 		free(stamps[STAMP_MAX-1].thumb);

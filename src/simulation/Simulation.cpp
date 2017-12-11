@@ -290,7 +290,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			elementCount[parts[r>>8].type]--;
 			parts[r>>8] = tempPart;
 			i = r>>8;
-			pmap[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 		else if ((r = photons[y][x]))
@@ -298,7 +297,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			elementCount[parts[r>>8].type]--;
 			parts[r>>8] = tempPart;
 			i = r>>8;
-			photons[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 		//Allocate new particle
@@ -311,7 +309,6 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			if (i > parts_lastActiveIndex)
 				parts_lastActiveIndex = i;
 			parts[i] = tempPart;
-			pmap[y][x] = tempPart.type | i<<8;
 			elementCount[tempPart.type]++;
 		}
 
@@ -408,22 +405,16 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 			auto n = soapList.find(parts[i].tmp);
 			if (n != end)
 				parts[i].tmp = n->second;
-			else
-			{
-				parts[i].tmp = 0;
-				parts[i].ctype ^= 2;
-			}
+			// sometimes the proper SOAP isn't found. It should remove the link, but seems to break some saves
+			// so just ignore it
 		}
 		if ((parts[i].ctype & 0x4) == 4)
 		{
 			auto n = soapList.find(parts[i].tmp2);
 			if (n != end)
 				parts[i].tmp2 = n->second;
-			else
-			{
-				parts[i].tmp2 = 0;
-				parts[i].ctype ^= 4;
-			}
+			// sometimes the proper SOAP isn't found. It should remove the link, but seems to break some saves
+			// so just ignore it
 		}
 	}
 
@@ -465,6 +456,7 @@ bool Simulation::LoadSave(int loadX, int loadY, Save *save, int replace, bool in
 	((PPIP_ElementDataContainer*)elementData[PT_PPIP])->ppip_changed = 1;
 	gravity_mask();
 	air->RecalculateBlockAirMaps(this);
+	RecalcFreeParticles(false);
 
 	if (save->paused)
 		sys_pause = true;

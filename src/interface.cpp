@@ -5717,18 +5717,7 @@ int open_ui(pixel *vid_buf, char *save_id, char *save_date, int instant_open)
 				{
 					queue_open = 0;
 
-					svf_open = 0;
-					svf_filename[0] = 0;
-					svf_fileopen = 0;
-					svf_publish = 0;
-					svf_own = 0;
-					svf_myvote = 0;
-					svf_id[0] = 0;
-					svf_name[0] = 0;
-					svf_description[0] = 0;
-					svf_author[0] = 0;
-					svf_tags[0] = 0;
-					the_game->SetReloadPoint(NULL);
+					clear_save_info();
 					error_ui(vid_buf, 0, (std::string("An error occurred when parsing the save: ") + e.what()).c_str());
 					if (instant_open)
 						break;
@@ -6272,8 +6261,12 @@ int execute_tagop(pixel *vid_buf, const char *op, char *tag)
 	return 0;
 }
 
-int execute_save(pixel *vid_buf)
+int execute_save(pixel *vid_buf, Save *save)
 {
+	// get saveData, may throw an exception
+	const unsigned char *saveData = save->GetSaveData();
+	unsigned int saveSize = save->GetSaveSize();
+
 	int status;
 	char *result;
 
@@ -6287,22 +6280,8 @@ int execute_save(pixel *vid_buf)
 	plens[1] = strlen(svf_description);
 	int len;
 
-	Json::Value serverSaveInfo;
-	serverSaveInfo["type"] = "save";
-	serverSaveInfo["id"] = svf_id[0] ? atoi(svf_id) : -1;
-	serverSaveInfo["title"] = svf_name;
-	serverSaveInfo["description"] = svf_description;
-	serverSaveInfo["published"] = svf_publish;
-	serverSaveInfo["date"] = (Json::Value::UInt64)time(NULL);
-	SaveAuthorInfo(&serverSaveInfo);
-
-	uploadparts[2] = (char*)build_save(&len, 0, 0, XRES, YRES, bmap, globalSim->air->vx, globalSim->air->vy, globalSim->air->pv, globalSim->air->fvx, globalSim->air->fvy, signs, parts, &serverSaveInfo);
-	plens[2] = len;
-	if (!uploadparts[2])
-	{
-		error_ui(vid_buf, 0, "Error creating save");
-		return 1;
-	}
+	uploadparts[2] = (char*)saveData;
+	plens[2] = saveSize;
 	uploadparts[3] = (char*)build_thumb(&len, 1);
 	plens[3] = len;
 	uploadparts[4] = (char*)((svf_publish==1)?"Public":"Private");
@@ -6322,9 +6301,7 @@ int execute_save(pixel *vid_buf)
 	             svf_user_id, /*svf_pass*/NULL, svf_session_id,
 	             &status, NULL);
 
-	Save *save = new Save(uploadparts[2], plens[2]);
 	the_game->SetReloadPoint(save);
-	delete save;
 
 	if (uploadparts[3])
 		free(uploadparts[3]);
@@ -6363,8 +6340,6 @@ int execute_save(pixel *vid_buf)
 	svf_own = 1;
 	if (result)
 		free(result);
-	serverSaveInfo["id"] = atoi(svf_id);
-	authors = serverSaveInfo;
 	return 0;
 }
 
@@ -7906,19 +7881,10 @@ void catalogue_ui(pixel * vid_buf)
 							bool success = false;
 							try
 							{
+								clear_save_info();
 								globalSim->LoadSave(0, 0, localSave, 1);
 								strncpy(svf_filename, csave->name, 255);
 								svf_fileopen = 1;
-								svf_open = 0;
-								svf_publish = 0;
-								svf_own = 0;
-								svf_myvote = 0;
-								svf_id[0] = 0;
-								svf_name[0] = 0;
-								svf_description[0] = 0;
-								svf_author[0] = 0;
-								svf_tags[0] = 0;
-								the_game->SetReloadPoint(localSave);
 								authors = localSave->authors;
 								success = true;
 							}
@@ -8319,4 +8285,20 @@ int mouse_get_state(int *x, int *y)
 	*x = sdl_x/sdl_scale;
 	*y = sdl_y/sdl_scale;
 	return sdl_b;
+}
+
+void clear_save_info()
+{
+	svf_open = 0;
+	svf_filename[0] = 0;
+	svf_fileopen = 0;
+	svf_publish = 0;
+	svf_own = 0;
+	svf_myvote = 0;
+	svf_id[0] = 0;
+	svf_name[0] = 0;
+	svf_description[0] = 0;
+	svf_author[0] = 0;
+	svf_tags[0] = 0;
+	the_game->SetReloadPoint(NULL);
 }

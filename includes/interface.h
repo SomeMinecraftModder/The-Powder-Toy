@@ -291,7 +291,7 @@ int search_results(char *str, int votes);
 
 int execute_tagop(pixel *vid_buf, const char *op, char *tag);
 
-int execute_save(pixel *vid_buf);
+int execute_save(pixel *vid_buf, Save *save);
 
 int execute_delete(pixel *vid_buf, char *id);
 
@@ -320,6 +320,8 @@ void simulation_ui(pixel *vid_buf);
 int mouse_get_state(int *x, int *y);
 
 void converttotime(const char *timestamp, char **timestring, int show_day, int show_year, int show_time);
+
+void clear_save_info();
 
 #endif
 
