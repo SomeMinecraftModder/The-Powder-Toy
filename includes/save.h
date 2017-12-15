@@ -16,26 +16,16 @@
  */
 #ifndef SAVEOLD_H
 #define SAVEOLD_H
-#include <vector>
 #include "BSON.h"
-#include "common/Matrix.h"
 #include "json/json.h"
 #include "simulation/ElementNumbers.h"
 #include "graphics/Pixel.h"
-
-class Sign;
-
-//transforms a save when you move it around with the arrow keys, or rotate it
-void *transform_save(void *odata, int *size, Matrix::matrix2d transform, Matrix::vector2d translate);
 
 //builds a thumb or something? idk
 void *build_thumb(int *size, int bzip2);
 
 //calls the correct function to prerender either an OPS or PSV save
 pixel *prerender_save(void *save, int size, int *width, int *height);
-
-//calls the correct function to parse either an OPS or PSV save
-int parse_save(void *save, int size, int replace, int x0, int y0, unsigned char bmap[YRES/CELL][XRES/CELL], float vx[YRES/CELL][XRES/CELL], float vy[YRES/CELL][XRES/CELL], float pv[YRES/CELL][XRES/CELL], float fvx[YRES/CELL][XRES/CELL], float fvy[YRES/CELL][XRES/CELL], std::vector<Sign*>& signs, void* partsptr, unsigned pmap[YRES][XRES], Json::Value *j, bool includePressure = true);
 
 //converts mod elements from older saves into the new correct id's, since as new elements are added to tpt the id's go up
 int fix_type(int type, int version, int modver, int (elementPalette)[PT_NUM] = NULL);
@@ -48,16 +38,10 @@ int check_save(int save_as, int orig_x0, int orig_y0, int orig_w, int orig_h, in
 int change_wall(int wt);
 int change_wallpp(int wt);
 
-//Current save prerenderer, builder, and parser
+//Current save prerenderer
 pixel *prerender_save_OPS(void *save, int size, int *width, int *height);
-void *build_save(int *size, int orig_x0, int orig_y0, int orig_w, int orig_h, unsigned char bmap[YRES/CELL][XRES/CELL], float vx[YRES/CELL][XRES/CELL], float vy[YRES/CELL][XRES/CELL], float pv[YRES/CELL][XRES/CELL], float fvx[YRES/CELL][XRES/CELL], float fvy[YRES/CELL][XRES/CELL], std::vector<Sign*>& signs, void* partsptr, Json::Value *j, bool tab = false, bool includePressure = true);
-int parse_save_OPS(void *save, int size, int replace, int x0, int y0, unsigned char bmap[YRES/CELL][XRES/CELL], float vx[YRES/CELL][XRES/CELL], float vy[YRES/CELL][XRES/CELL], float pv[YRES/CELL][XRES/CELL], float fvx[YRES/CELL][XRES/CELL], float fvy[YRES/CELL][XRES/CELL], std::vector<Sign*>& signs, void* partsptr, unsigned pmap[YRES][XRES], Json::Value *j, bool includePressure);
 
-//Old save prerenderer and parser
+//Old save prerenderer
 pixel *prerender_save_PSv(void *save, int size, int *width, int *height);
-int parse_save_PSv(void *save, int size, int replace, int x0, int y0, unsigned char bmap[YRES/CELL][XRES/CELL], float fvx[YRES/CELL][XRES/CELL], float fvy[YRES/CELL][XRES/CELL], std::vector<Sign*>& signs, void* partsptr, unsigned pmap[YRES][XRES]);
-
-void ConvertJsonToBson(bson *b, Json::Value j, int depth = 0);
-void ConvertBsonToJson(bson_iterator *b, Json::Value *j, int depth = 0);
 
 #endif
