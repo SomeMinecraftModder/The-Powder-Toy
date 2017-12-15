@@ -277,7 +277,7 @@ void tab_save(int num);
 class Save;
 Save *stamp_load(int i, int reorder);
 #endif
-int tab_load(int tabNum, bool del = false);
+int tab_load(int tabNum, bool del = false, bool showException = true);
 void stamp_init();
 void del_stamp(int d);
 int set_scale(int scale, int kiosk);

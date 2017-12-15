@@ -165,7 +165,7 @@ public:
 	void UpdateStampCoordinates(Point cursor, Point offset = Point(0, 0));
 	StampState GetStampState() { return state; }
 	void ResetStampState();
-	Point GetStampPos() { return loadPos; }
+	Point GetStampPos() { return loadPos - (loadSize - stampOffset)/2; }
 	Point GetStampSize() { return loadSize; }
 	pixel * GetStampImg() { return waitToDraw ? NULL : stampImg; }
 	Point GetSavePos() { return savePos; }

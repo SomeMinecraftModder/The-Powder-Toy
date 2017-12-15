@@ -1063,7 +1063,7 @@ void PowderToy::TranslateSave(Point point)
 	{
 		Matrix::vector2d translate = Matrix::v2d_new(point.X, point.Y);
 		Matrix::vector2d translated = stampData->Translate(translate);
-		stampOffset += Point(translated.x, translate.y);
+		stampOffset += Point(translated.x, translated.y);
 
 		free(stampImg);
 		stampImg = prerender_save((char*)stampData->GetSaveData(), stampData->GetSaveSize(), &loadSize.X, &loadSize.Y);
@@ -1882,7 +1882,8 @@ void PowderToy::OnMouseUp(int x, int y, unsigned char button)
 
 		try
 		{
-			sim->LoadSave(loadPos.X, loadPos.Y, stampData, 0, !shiftHeld);
+			Point realLoadPos = GetStampPos();
+			sim->LoadSave(realLoadPos.X, realLoadPos.Y, stampData, 0, !shiftHeld);
 			MergeStampAuthorInfo(stampData->authors);
 		}
 		catch (ParseException e)

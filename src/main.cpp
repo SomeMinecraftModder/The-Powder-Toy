@@ -625,7 +625,7 @@ Save *stamp_load(int i, int reorder)
 	return save;
 }
 
-int tab_load(int tabNum, bool del)
+int tab_load(int tabNum, bool del, bool showException)
 {
 	char *saveData;
 	int saveSize;
@@ -652,7 +652,10 @@ int tab_load(int tabNum, bool del)
 		}
 		catch (ParseException e)
 		{
-			Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
+			if (showException)
+				Engine::Ref().ShowWindow(new InfoPrompt("Error loading save", e.what()));
+			else
+				std::cout << "Error loading tab: " << e.what() << std::endl;
 		}
 
 		delete save;
@@ -1355,7 +1358,7 @@ int main(int argc, char *argv[])
 		sprintf(tabNames[i], "Untitled Simulation %i", i+1);
 		tabThumbnails[i] = NULL;
 	}
-	if (tab_load(1, true))
+	if (tab_load(1, true, false))
 	{
 		char fn[64];
 		for (int i = 2; i <= 9; i++)
@@ -1377,7 +1380,15 @@ int main(int argc, char *argv[])
 	UpdateToolTip(it_msg, Point(16, 20), INTROTIP, 10235);
 
 	Engine::Ref().ShowWindow(the_game);
-	Engine::Ref().MainLoop();
+	try
+	{
+		Engine::Ref().MainLoop();
+	}
+	catch (std::exception& e)
+	{
+		BlueScreen(("Unhandled c++ exception: " + std::string(e.what())).c_str());
+	}
+
 	//delete engine;
 
 	return 0;

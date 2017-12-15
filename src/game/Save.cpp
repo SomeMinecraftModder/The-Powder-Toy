@@ -2463,8 +2463,15 @@ void Save::BuildSave()
 
 vector2d Save::Translate(vector2d translate)
 {
-	if (expanded && !saveData)
-		BuildSave();
+	try
+	{
+		if (!expanded)
+			ParseSave();
+	}
+	catch (ParseException& e)
+	{
+		return Matrix::v2d_zero;
+	}
 
 	vector2d translateReal = translate;
 	float minx = 0, miny = 0, maxx = 0, maxy = 0;
@@ -2534,8 +2541,15 @@ vector2d Save::Translate(vector2d translate)
 
 void Save::Transform(matrix2d transform, vector2d translate)
 {
-	if (expanded && !saveData)
-		BuildSave();
+	try
+	{
+		if (!expanded)
+			ParseSave();
+	}
+	catch (ParseException& e)
+	{
+		return;
+	}
 
 	int width = blockWidth*CELL, height = blockHeight*CELL, newWidth, newHeight;
 	// top left, bottom right corner
@@ -2574,8 +2588,15 @@ void Save::Transform(matrix2d transform, vector2d translate)
 // translateReal is the original amount we tried to translate, used to calculate wall shifting
 void Save::Transform(matrix2d transform, vector2d translate, vector2d translateReal, int newWidth, int newHeight)
 {
-	if (expanded && !saveData)
-		BuildSave();
+	try
+	{
+		if (!expanded)
+			ParseSave();
+	}
+	catch (ParseException& e)
+	{
+		return;
+	}
 
 	if (newWidth > XRES)
 		newWidth = XRES;
@@ -2698,6 +2719,10 @@ void Save::Transform(matrix2d transform, vector2d translate, vector2d translateR
 	velocityX = velocityXNew;
 	velocityY = velocityYNew;
 	ambientHeat = ambientHeatNew;
+
+	// invalidate save data
+	delete saveData;
+	saveData = NULL;
 }
 
 template <typename T>
