@@ -7715,6 +7715,8 @@ int save_filename_ui(pixel *vid_buf, Save *save)
 			clean_text(ed.str,256);
 			if (strlen(ed.str))
 			{
+				// TODO: this does nothing because we build the save data earlier to render it
+				// can be fixed once rendering doesn't require building a save
 				save->authors["title"] = ed.str;
 				ret = DoLocalSave(ed.str, save);
 				if (ret == -1)

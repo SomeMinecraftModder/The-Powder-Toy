@@ -555,6 +555,7 @@ void tab_save(int num)
 
 	//build the tab
 	Save *tab = globalSim->CreateSave(0, 0, XRES, YRES, true);
+	tab->authors = tabInfo;
 	Renderer::Ref().CreateSave(tab);
 	try
 	{
