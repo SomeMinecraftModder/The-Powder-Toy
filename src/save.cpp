@@ -15,40 +15,17 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "common/tpt-minmax.h"
 #include <bzlib.h>
-#include <climits>
-#include <cmath>
-#include <sstream>
-#include <stdexcept>
 #include "defines.h"
 #include "powder.h"
 #include "save.h"
-#include "gravity.h"
 #include "graphics.h"
 #include "BSON.h"
-#include "hmap.h"
 #include "interface.h"
-#include "luaconsole.h"
 
-#include "common/Matrix.h"
-#include "common/Platform.h"
-#include "game/Authors.h"
-#include "game/Menus.h"
-#include "game/Sign.h"
-#include "graphics/Renderer.h"
 #include "simulation/Simulation.h"
-#include "simulation/Tool.h"
 #include "simulation/WallNumbers.h"
 #include "simulation/ToolNumbers.h"
-#include "simulation/GolNumbers.h"
-#include "simulation/elements/FIGH.h"
-#include "simulation/elements/PPIP.h"
-#include "simulation/elements/LIFE.h"
-#include "simulation/elements/MOVS.h"
-#include "simulation/elements/STKM.h"
-
-using namespace Matrix;
 
 //Pop
 pixel *prerender_save(void *save, int size, int *width, int *height)
